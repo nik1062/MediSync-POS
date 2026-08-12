@@ -14,10 +14,26 @@ const InvoiceItem = sequelize.define(
       allowNull: false,
       field: 'invoice_id',
     },
+    productId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: 'product_id',
+    },
     itemName: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
       field: 'item_name',
+    },
+    quantity: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 1,
+    },
+    unitPrice: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.00,
+      field: 'unit_price',
     },
     price: {
       type: DataTypes.DECIMAL(10, 2),

@@ -1,5 +1,8 @@
-const { sequelize, Invoice, InvoiceItem, Consultation, Product, CareEpisode, Prescription, PrescriptionItem, AuditLog } = require('../models');
+const { sequelize, Invoice, InvoiceItem, Consultation, Product, CareEpisode, Prescription, PrescriptionItem, AuditLog, InventoryBatch, CashRegisterShift, StockMovement } = require('../models');
 const catchAsync = require('../utils/catchAsync');
+const { MockPaymentProvider } = require('../services/payment.service');
+const { Op } = require('sequelize');
+const { sendNotification } = require('../services/notification.service');
 
 const generateInvoice = catchAsync(async (req, res) => {
   const { consultationId, patientName, items, discount } = req.body;
@@ -45,26 +48,52 @@ const generateInvoice = catchAsync(async (req, res) => {
             throw new Error(`Product not found.`);
           }
 
-          if (product.stockQuantity < item.quantity) {
-            throw new Error(`Insufficient stock for product: ${product.name}`);
+          // FEFO Inventory Logic (First-Expiring, First-Out)
+          let quantityToDeduct = item.quantity;
+          const batches = await InventoryBatch.findAll({
+            where: { productId: product.id },
+            order: [['expiryDate', 'ASC']],
+            lock: t.LOCK.UPDATE,
+            transaction: t
+          });
+
+          // Check total batch quantity
+          const totalBatchQty = batches.reduce((sum, b) => sum + b.quantity, 0);
+          if (totalBatchQty < quantityToDeduct) {
+             throw new Error(`Insufficient batch stock for ${product.name}. Available: ${totalBatchQty}, Requested: ${quantityToDeduct}`);
           }
 
-          product.stockQuantity -= item.quantity;
+          for (const batch of batches) {
+            if (quantityToDeduct <= 0) break;
+            if (batch.quantity > 0) {
+              const deductAmount = Math.min(batch.quantity, quantityToDeduct);
+              batch.quantity -= deductAmount;
+              quantityToDeduct -= deductAmount;
+              await batch.save({ transaction: t });
+            }
+          }
+
+          product.stockCount -= item.quantity;
           await product.save({ transaction: t });
 
-          const price = parseFloat(product.price);
+          const price = parseFloat(product.sellingPrice);
           const totalItemPrice = price * item.quantity;
           subtotal += totalItemPrice;
 
           itemRecords.push({
-            itemName: `${product.name} (x${item.quantity})`,
-            price: totalItemPrice
+            productId: product.id,
+            quantity: item.quantity,
+            unitPrice: price,
+            price: totalItemPrice,
+            itemName: `${product.name} (x${item.quantity})`
           });
         } else if (item.itemName) {
           const price = parseFloat(item.price || 0);
           subtotal += price;
           itemRecords.push({
             itemName: item.itemName,
+            quantity: 1,
+            unitPrice: price,
             price: price
           });
         }
@@ -72,10 +101,10 @@ const generateInvoice = catchAsync(async (req, res) => {
 
       // Add consultation fee item automatically if consultationId is supplied or no items provided
       if (consultationId) {
-        itemRecords.push({ itemName: 'Consultation Fee', price: fee });
+        itemRecords.push({ itemName: 'Consultation Fee', price: fee, quantity: 1, unitPrice: fee });
         subtotal += fee;
       } else if (itemRecords.length === 0) {
-        itemRecords.push({ itemName: 'Consultation Fee', price: fee });
+        itemRecords.push({ itemName: 'Consultation Fee', price: fee, quantity: 1, unitPrice: fee });
         subtotal += fee;
       }
 
@@ -120,12 +149,15 @@ const generateInvoice = catchAsync(async (req, res) => {
 
 const payInvoice = catchAsync(async (req, res) => {
   const { id } = req.params;
-  const { paymentMethod, items } = req.body;
+  const { paymentMethod, items, insuranceClaimAmount, patientPayableAmount } = req.body;
   const clinicId = req.user.clinicId;
 
   if (!['CASH', 'CARD', 'UPI', 'MIXED'].includes(paymentMethod)) {
     return res.status(400).json({ success: false, message: 'Invalid payment method. Use CASH, CARD, UPI, or MIXED.' });
   }
+
+  // Simulate payment
+  await MockPaymentProvider.processPayment(1, paymentMethod, {});
 
   try {
     const result = await sequelize.transaction(async (t) => {
@@ -136,6 +168,7 @@ const payInvoice = catchAsync(async (req, res) => {
 
       let subtotalIncrease = 0;
       const newInvoiceItems = [];
+      let lowStockWarning = false;
 
       // Process dispensed drugs (items from the POS cart)
       if (items && items.length > 0) {
@@ -149,7 +182,7 @@ const payInvoice = catchAsync(async (req, res) => {
             transaction: t
           });
           if (!product) throw new Error(`Product not found: ${item.productId}`);
-          if (product.stockQuantity < item.quantity) throw new Error(`Insufficient stock for product: ${product.name}`);
+          if (product.stockCount < item.quantity) throw new Error(`Insufficient stock for product: ${product.name}`);
 
           // Controlled Substance Gate: Evaluate product.scheduleClass before deducting stock
           if (['H1', 'X'].includes(product.scheduleClass)) {
@@ -172,18 +205,63 @@ const payInvoice = catchAsync(async (req, res) => {
             }, { transaction: t });
           }
 
-          // Deduct stock
-          product.stockQuantity -= item.quantity;
+          // FEFO Inventory Logic (First-Expiring, First-Out)
+          let quantityToDeduct = item.quantity;
+          const batches = await InventoryBatch.findAll({
+            where: { productId: product.id },
+            order: [['expiryDate', 'ASC']],
+            lock: t.LOCK.UPDATE,
+            transaction: t
+          });
+
+          // Check total batch quantity
+          const totalBatchQty = batches.reduce((sum, b) => sum + b.quantity, 0);
+          if (totalBatchQty < quantityToDeduct) {
+             throw new Error(`Insufficient batch stock for ${product.name}. Available: ${totalBatchQty}, Requested: ${quantityToDeduct}`);
+          }
+
+          for (const batch of batches) {
+            if (quantityToDeduct <= 0) break;
+            if (batch.quantity > 0) {
+              const deductAmount = Math.min(batch.quantity, quantityToDeduct);
+              batch.quantity -= deductAmount;
+              quantityToDeduct -= deductAmount;
+              await batch.save({ transaction: t });
+            }
+          }
+
+          // Deduct global stock cache
+          const prevStock = product.stockCount;
+          product.stockCount -= item.quantity;
           await product.save({ transaction: t });
+          
+          await StockMovement.create({
+            clinicId,
+            productId: product.id,
+            type: 'SALE',
+            quantity: item.quantity,
+            previousStock: prevStock,
+            newStock: product.stockCount,
+            referenceType: 'INVOICE',
+            referenceId: invoice.id,
+            performedBy: req.user.id
+          }, { transaction: t });
+
+          if (product.stockCount < product.minimumStock) {
+            lowStockWarning = true;
+          }
 
           // Calculate cost
-          const price = parseFloat(product.price);
+          const price = parseFloat(product.sellingPrice);
           const totalItemPrice = price * item.quantity;
           subtotalIncrease += totalItemPrice;
 
           newInvoiceItems.push({
             invoiceId: invoice.id,
+            productId: product.id,
             itemName: `${product.name} (x${item.quantity})`,
+            quantity: item.quantity,
+            unitPrice: price,
             price: totalItemPrice
           });
 
@@ -209,6 +287,38 @@ const payInvoice = catchAsync(async (req, res) => {
 
       invoice.paymentMethod = paymentMethod;
       invoice.paymentStatus = 'PAID';
+      
+      let amountPaidByPatient = invoice.totalAmount;
+      if (paymentMethod === 'MIXED' && (insuranceClaimAmount !== undefined || patientPayableAmount !== undefined)) {
+        invoice.insuranceClaimAmount = insuranceClaimAmount || 0;
+        invoice.patientPayableAmount = patientPayableAmount || 0;
+        amountPaidByPatient = invoice.patientPayableAmount;
+      } else {
+        invoice.patientPayableAmount = invoice.totalAmount;
+      }
+
+      await invoice.save({ transaction: t });
+
+      // Log into Shift Register if available (for clinic staff, not patients paying their own invoice)
+      if (req.user.role !== 'PATIENT') {
+        const activeShift = await CashRegisterShift.findOne({
+          where: { userId: req.user.id, clinicId, status: 'OPEN' },
+          lock: t.LOCK.UPDATE,
+          transaction: t
+        });
+
+        if (activeShift) {
+          if (paymentMethod === 'CASH') activeShift.totalCashSales = parseFloat(activeShift.totalCashSales) + amountPaidByPatient;
+          else if (paymentMethod === 'CARD') activeShift.totalCardSales = parseFloat(activeShift.totalCardSales) + amountPaidByPatient;
+          else if (paymentMethod === 'UPI') activeShift.totalUpiSales = parseFloat(activeShift.totalUpiSales) + amountPaidByPatient;
+          else if (paymentMethod === 'MIXED') {
+            // In a real system you'd specify cash vs card split. Default to card for MIXED co-pays.
+            activeShift.totalCardSales = parseFloat(activeShift.totalCardSales) + amountPaidByPatient;
+          }
+          await activeShift.save({ transaction: t });
+        }
+      }
+
       await invoice.save({ transaction: t });
 
       // If associated with a consultation/care episode, update status
@@ -218,12 +328,26 @@ const payInvoice = catchAsync(async (req, res) => {
           consult.paymentStatus = 'PAID';
           await consult.save({ transaction: t });
         }
+        
+        // If items were dispensed and we know the patient, send READY_FOR_PICKUP notification
+        if (newInvoiceItems.length > 0 && consult) {
+          return { invoice, lowStockWarning, notifyPatientId: consult.patientId };
+        }
       }
 
-      return invoice;
+      return { invoice, lowStockWarning };
     });
 
-    res.status(200).json({ success: true, data: result });
+    if (result.lowStockWarning) {
+      res.setHeader('X-Low-Stock-Warning', 'true');
+    }
+    
+    // Send Notification outside transaction
+    if (result.notifyPatientId) {
+      await sendNotification(clinicId, result.notifyPatientId, 'READY_FOR_PICKUP', { invoiceId: result.invoice.id });
+    }
+
+    res.status(200).json({ success: true, data: result.invoice });
   } catch (err) {
     if (['INVOICE_NOT_FOUND', 'ALREADY_PAID', 'UNAUTHORIZED'].includes(err.message) || err.message.startsWith('Insufficient') || err.message.startsWith('Product') || err.message.startsWith('CONTROLLED_SUBSTANCE_RESTRICTION')) {
       return res.status(400).json({ success: false, message: err.message });
@@ -324,4 +448,162 @@ const lookupEpisode = catchAsync(async (req, res) => {
   res.status(200).json({ success: true, data: episode });
 });
 
-module.exports = { generateInvoice, payInvoice, getClinicInvoices, renewSubscription, lookupEpisode };
+const getDailySales = catchAsync(async (req, res) => {
+  const clinicId = req.user.clinicId;
+  const { Op } = require('sequelize');
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const sales = await Invoice.findAll({
+    where: {
+      clinicId,
+      paymentStatus: 'PAID',
+      updatedAt: { [Op.gte]: today }
+    },
+    attributes: [
+      'paymentMethod',
+      [sequelize.fn('sum', sequelize.col('totalAmount')), 'total']
+    ],
+    group: ['paymentMethod']
+  });
+
+  res.status(200).json({ success: true, data: sales });
+});
+
+const updateInventory = catchAsync(async (req, res) => {
+  const clinicId = req.user.clinicId;
+  const { id, name, sku, stockQuantity, retailPrice, scheduleClass } = req.body;
+
+  let product;
+  if (id) {
+    product = await Product.findOne({ where: { id, clinicId } });
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found.' });
+    if (name) product.name = name;
+    if (sku) product.sku = sku;
+    
+    if (stockQuantity !== undefined) {
+      const stockDiff = stockQuantity - product.stockCount;
+      product.stockCount = stockQuantity;
+      
+      // If stock increased, add a new batch with a generic expiry
+      if (stockDiff > 0) {
+        const { InventoryBatch } = require('../models');
+        const expiryDate = new Date();
+        expiryDate.setFullYear(expiryDate.getFullYear() + 1); // 1 year expiry
+        await InventoryBatch.create({
+          clinicId,
+          productId: product.id,
+          batchNumber: `AUTO-${Date.now()}`,
+          quantity: stockDiff,
+          expiryDate
+        });
+      }
+    }
+    
+    if (retailPrice !== undefined) product.sellingPrice = retailPrice;
+    if (scheduleClass) product.scheduleClass = scheduleClass;
+    await product.save();
+  } else {
+    product = await Product.create({
+      clinicId,
+      name,
+      sku,
+      stockCount: stockQuantity,
+      sellingPrice: retailPrice,
+      scheduleClass
+    });
+    
+    // Create initial batch for new products so FEFO doesn't block checkout
+    if (stockQuantity > 0) {
+      const { InventoryBatch } = require('../models');
+      const expiryDate = new Date();
+      expiryDate.setFullYear(expiryDate.getFullYear() + 1); // 1 year expiry
+      await InventoryBatch.create({
+        clinicId,
+        productId: product.id,
+        batchNumber: `INIT-${Date.now()}`,
+        quantity: stockQuantity,
+        expiryDate
+      });
+    }
+  }
+
+  res.status(200).json({ success: true, data: product });
+});
+
+const getShiftStatus = catchAsync(async (req, res) => {
+  const shift = await CashRegisterShift.findOne({
+    where: { userId: req.user.id, clinicId: req.user.clinicId, status: 'OPEN' }
+  });
+  res.status(200).json({ success: true, data: shift });
+});
+
+const openShift = catchAsync(async (req, res) => {
+  const { openingBalance } = req.body;
+  const existing = await CashRegisterShift.findOne({
+    where: { userId: req.user.id, clinicId: req.user.clinicId, status: 'OPEN' }
+  });
+  if (existing) {
+    return res.status(400).json({ success: false, message: 'You already have an open shift.' });
+  }
+
+  const shift = await CashRegisterShift.create({
+    clinicId: req.user.clinicId,
+    userId: req.user.id,
+    openingBalance: openingBalance || 0,
+    status: 'OPEN'
+  });
+
+  res.status(201).json({ success: true, data: shift });
+});
+
+const closeShift = catchAsync(async (req, res) => {
+  const { expectedClosingBalance } = req.body;
+  const shift = await CashRegisterShift.findOne({
+    where: { userId: req.user.id, clinicId: req.user.clinicId, status: 'OPEN' }
+  });
+  
+  if (!shift) {
+    return res.status(404).json({ success: false, message: 'No open shift found to close.' });
+  }
+
+  // Calculate totals from invoices created during this shift
+  const { Op } = require('sequelize');
+  const invoices = await Invoice.findAll({
+    where: {
+      clinicId: req.user.clinicId,
+      paymentStatus: 'PAID',
+      updatedAt: { [Op.gte]: shift.openedAt } // Assuming they were paid during the shift
+    }
+  });
+
+  let totalCash = 0;
+  let totalCard = 0;
+  let totalUpi = 0;
+
+  invoices.forEach(inv => {
+    const amount = parseFloat(inv.totalAmount);
+    if (inv.paymentMethod === 'CASH') totalCash += amount;
+    if (inv.paymentMethod === 'CARD') totalCard += amount;
+    if (inv.paymentMethod === 'UPI') totalUpi += amount;
+    if (inv.paymentMethod === 'MIXED') {
+      // For simplicity, if mixed we'd normally track the split. We'll just put it to cash for now unless split data exists.
+      totalCash += amount; 
+    }
+  });
+
+  shift.totalCashSales = totalCash;
+  shift.totalCardSales = totalCard;
+  shift.totalUpiSales = totalUpi;
+  shift.closingBalance = parseFloat(shift.openingBalance) + totalCash;
+  shift.expectedClosingBalance = expectedClosingBalance || shift.closingBalance;
+  shift.status = 'CLOSED';
+  shift.closedAt = new Date();
+
+  await shift.save();
+
+  res.status(200).json({ success: true, data: shift });
+});
+
+module.exports = { generateInvoice, payInvoice, getClinicInvoices, renewSubscription, lookupEpisode, getDailySales, updateInventory, getShiftStatus, openShift, closeShift };

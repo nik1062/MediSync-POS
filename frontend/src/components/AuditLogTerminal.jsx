@@ -38,8 +38,9 @@ export function AuditLogTerminal() {
   }, []);
 
   useEffect(() => {
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (bottomRef.current && bottomRef.current.parentElement) {
+      const container = bottomRef.current.parentElement;
+      container.scrollTop = container.scrollHeight;
     }
   }, [logs]);
 

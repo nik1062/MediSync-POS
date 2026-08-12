@@ -24,6 +24,18 @@ export function SettingsPage({ user, onUpdateUser }) {
     weight: '72'
   });
 
+  // Family Members State
+  const [familyMembers, setFamilyMembers] = useState([]);
+  const [loadingFamily, setLoadingFamily] = useState(false);
+  const [familyForm, setFamilyForm] = useState({
+    name: '',
+    relationship: '',
+    dateOfBirth: '',
+    gender: 'MALE',
+    bloodGroup: 'O-Positive',
+    allergies: ''
+  });
+
   // Availability Settings Form State (Doctor Only)
   const [availabilityForm, setAvailabilityForm] = useState({
     days: {
@@ -56,8 +68,26 @@ export function SettingsPage({ user, onUpdateUser }) {
         fetchDoctorAvailability();
         fetchClinicDetails();
       }
+      if (user.role === 'PATIENT') {
+        fetchFamilyMembers();
+      }
     }
   }, [user]);
+
+  const fetchFamilyMembers = async () => {
+    setLoadingFamily(true);
+    try {
+      const token = localStorage.getItem('token');
+      const { data } = await axios.get('http://localhost:5000/api/family', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setFamilyMembers(data.data || []);
+    } catch (err) {
+      console.error('Failed to load family members:', err);
+    } finally {
+      setLoadingFamily(false);
+    }
+  };
 
   const fetchClinicDetails = async () => {
     setLoadingClinic(true);
@@ -144,6 +174,42 @@ export function SettingsPage({ user, onUpdateUser }) {
       setErrorMsg('Failed to update medical profile.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFamilySubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setSuccessMsg('');
+    setErrorMsg('');
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post('http://localhost:5000/api/family', familyForm, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSuccessMsg('Family member added successfully!');
+      setFamilyForm({ name: '', relationship: '', dateOfBirth: '', gender: 'MALE', bloodGroup: 'O-Positive', allergies: '' });
+      fetchFamilyMembers();
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || 'Failed to add family member.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const handleDeleteFamily = async (id) => {
+    if (!window.confirm('Are you sure you want to remove this family member?')) return;
+    setLoadingFamily(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`http://localhost:5000/api/family/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchFamilyMembers();
+    } catch (err) {
+      setErrorMsg('Failed to remove family member.');
+    } finally {
+      setLoadingFamily(false);
     }
   };
 
@@ -234,14 +300,32 @@ export function SettingsPage({ user, onUpdateUser }) {
           </button>
           
           {user.role === 'PATIENT' && (
-            <button 
-              type="button" 
-              className={`settings-nav-btn ${activeTab === 'medical' ? 'active' : ''}`}
-              onClick={() => { setActiveTab('medical'); setSuccessMsg(''); setErrorMsg(''); }}
-            >
-              <FileText size={18} />
-              <span>Medical Profile</span>
-            </button>
+            <>
+              <button 
+                type="button" 
+                className={`settings-nav-btn ${activeTab === 'medical' ? 'active' : ''}`}
+                onClick={() => { setActiveTab('medical'); setSuccessMsg(''); setErrorMsg(''); }}
+              >
+                <FileText size={18} />
+                <span>Medical Profile</span>
+              </button>
+              <button 
+                type="button" 
+                className={`settings-nav-btn ${activeTab === 'family' ? 'active' : ''}`}
+                onClick={() => { setActiveTab('family'); setSuccessMsg(''); setErrorMsg(''); }}
+              >
+                <User size={18} />
+                <span>Family Members</span>
+              </button>
+              <button 
+                type="button" 
+                className={`settings-nav-btn ${activeTab === 'locker' ? 'active' : ''}`}
+                onClick={() => { setActiveTab('locker'); setSuccessMsg(''); setErrorMsg(''); }}
+              >
+                <ShieldAlert size={18} />
+                <span>Digital Locker</span>
+              </button>
+            </>
           )}
 
           {user.role === 'DOCTOR' && (
@@ -374,6 +458,153 @@ export function SettingsPage({ user, onUpdateUser }) {
                 </button>
               </div>
             </form>
+          )}
+
+          {activeTab === 'family' && (
+            <div>
+              <h2 className="settings-tab-title">Family Members</h2>
+              <p style={{ color: 'var(--color-text-secondary)', fontSize: '13px', marginBottom: '24px' }}>
+                Add dependents to book appointments and track health records on their behalf.
+              </p>
+
+              {loadingFamily ? (
+                <p style={{ color: 'var(--color-text-secondary)' }}>Loading family members...</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '32px' }}>
+                  {familyMembers.length === 0 && (
+                    <div style={{ padding: '24px', border: '1px dashed var(--color-border)', borderRadius: '12px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+                      No family members added yet.
+                    </div>
+                  )}
+                  {familyMembers.map(member => (
+                    <div key={member.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '12px' }}>
+                      <div>
+                        <strong style={{ fontSize: '15px', display: 'block' }}>{member.name}</strong>
+                        <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                          {member.relationship} &middot; {member.gender || 'N/A'} &middot; {member.bloodGroup || 'N/A'}
+                        </span>
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteFamily(member.id)}
+                        className="btn btn-secondary btn-sm"
+                        style={{ color: 'var(--color-danger)', borderColor: 'var(--color-danger-light)', background: 'var(--color-white)' }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <form onSubmit={handleFamilySubmit} style={{ padding: '24px', background: 'var(--color-bg-alt)', borderRadius: '12px', border: '1px solid var(--color-border)' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '16px' }}>Add New Member</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Full Name</label>
+                    <input 
+                      type="text" 
+                      className="form-input" 
+                      value={familyForm.name} 
+                      onChange={e => setFamilyForm({ ...familyForm, name: e.target.value })} 
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Relationship</label>
+                    <select 
+                      className="form-input" 
+                      value={familyForm.relationship} 
+                      onChange={e => setFamilyForm({ ...familyForm, relationship: e.target.value })}
+                      required
+                    >
+                      <option value="">Select...</option>
+                      <option value="Child">Child</option>
+                      <option value="Parent">Parent</option>
+                      <option value="Spouse">Spouse</option>
+                      <option value="Sibling">Sibling</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Date of Birth</label>
+                    <input 
+                      type="date" 
+                      className="form-input" 
+                      value={familyForm.dateOfBirth} 
+                      onChange={e => setFamilyForm({ ...familyForm, dateOfBirth: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Gender</label>
+                    <select 
+                      className="form-input" 
+                      value={familyForm.gender} 
+                      onChange={e => setFamilyForm({ ...familyForm, gender: e.target.value })}
+                    >
+                      <option value="MALE">Male</option>
+                      <option value="FEMALE">Female</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Blood Group</label>
+                    <select 
+                      className="form-input" 
+                      value={familyForm.bloodGroup} 
+                      onChange={e => setFamilyForm({ ...familyForm, bloodGroup: e.target.value })}
+                    >
+                      <option value="A-Positive">A-Positive</option>
+                      <option value="O-Positive">O-Positive</option>
+                      <option value="B-Positive">B-Positive</option>
+                      <option value="AB-Positive">AB-Positive</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+                  <button type="submit" className="btn btn-primary" disabled={loading}>
+                    Add Family Member
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {activeTab === 'locker' && (
+            <div>
+              <h2 className="settings-tab-title">Digital Health Locker</h2>
+              <p style={{ color: 'var(--color-text-secondary)', fontSize: '13px', marginBottom: '24px' }}>
+                Store external prescriptions, lab reports, and scans here safely.
+              </p>
+              
+              <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '12px', padding: '24px', textAlign: 'center', marginBottom: '24px' }}>
+                <ShieldAlert size={32} style={{ color: '#94a3b8', margin: '0 auto 12px' }} />
+                <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 600 }}>Upload New Document</h4>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center' }}>
+                  <input type="file" className="form-input" style={{ maxWidth: '300px', fontSize: '12px' }} />
+                  <button type="button" className="btn btn-primary" onClick={() => { setSuccessMsg('Document successfully saved to secure locker'); }}>Upload</button>
+                </div>
+              </div>
+
+              <div>
+                <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px' }}>Stored Documents</h3>
+                <div style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ padding: '8px', background: 'var(--color-primary-50)', color: 'var(--color-primary)', borderRadius: '8px' }}>
+                      <FileText size={20} />
+                    </div>
+                    <div>
+                      <strong style={{ display: 'block', fontSize: '13px' }}>Blood Test Report</strong>
+                      <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>Uploaded Oct 12, 2023 &middot; LAB REPORT</span>
+                    </div>
+                  </div>
+                  <button className="btn btn-secondary btn-sm" style={{ padding: '4px 8px' }}>View</button>
+                </div>
+              </div>
+            </div>
           )}
 
           {activeTab === 'availability' && (

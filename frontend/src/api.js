@@ -17,6 +17,7 @@ export const authAPI = {
   login: (data) => api.post('/auth/login', data),
   register: (data) => api.post('/auth/register', data),
   getProfile: () => api.get('/profile'),
+  toggleOnline: () => api.post('/auth/toggle-online')
 };
 
 export const doctorAPI = {
@@ -26,11 +27,23 @@ export const doctorAPI = {
 export const consultationAPI = {
   create: (doctorId, scheduledAt, paymentStatus, fee) => api.post('/consultations', { doctorId, scheduledAt, paymentStatus, fee }),
   getAll: () => api.get('/consultations'),
+  getById: (id) => api.get(`/consultations/${id}`),
   updateStatus: (id, status) => api.patch(`/consultations/${id}/status`, { status }),
   updateNotes: (id, notes) => api.patch(`/consultations/${id}/notes`, { notes }),
-  getMessages: (id) => api.get(`/consultations/${id}/messages`),
-  sendMessage: (id, message) => api.post(`/consultations/${id}/messages`, { message }),
   finalize: (id, data) => api.post(`/consultations/${id}/finalize`, data),
+  escalate: (id) => api.post(`/consultations/${id}/escalate`),
+  sendMessage: (id, message) => api.post(`/consultations/${id}/messages`, { message }),
+  getMessages: (id) => api.get(`/consultations/${id}/messages`),
+  payPatientInvoice: (id, payload) => api.post(`/consultations/${id}/pay`, payload)
+};
+
+export const appointmentAPI = {
+  create: (doctorId, scheduledAt, paymentStatus, fee, familyMemberId, urgencyLevel) => 
+    api.post('/appointments/book', { doctorId, scheduledAt, paymentStatus, fee, familyMemberId, urgencyLevel }),
+  getAll: () => api.get('/appointments'),
+  getById: (id) => api.get(`/appointments/${id}`),
+  updateStatus: (id, status) => api.patch(`/appointments/${id}/status`, { status }),
+  cancel: (id) => api.patch(`/appointments/${id}/status`, { status: 'CANCELLED' })
 };
 
 export const productAPI = {
@@ -53,6 +66,21 @@ export const posAPI = {
   generate: (data) => api.post('/api/pos/generate', data),
   pay: (id, data) => api.put(`/api/pos/${id}/pay`, data),
   getInvoices: () => api.get('/api/pos'),
+  getShift: () => api.get('/api/pos/shift'),
+  openShift: (data) => api.post('/api/pos/shift/open', data),
+  closeShift: (data) => api.post('/api/pos/shift/close', data),
+  searchPatients: (query) => api.get(`/api/pos/patients/search?query=${query}`)
+};
+
+export const familyAPI = {
+  getAll: () => api.get('/api/family'),
+  create: (data) => api.post('/api/family', data),
+  update: (id, data) => api.put(`/api/family/${id}`, data),
+  delete: (id) => api.delete(`/api/family/${id}`)
+};
+
+export const prescriptionsAPI = {
+  getMyPrescriptions: () => api.get('/prescriptions/my'),
 };
 
 export default api;

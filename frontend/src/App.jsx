@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { authAPI } from './api';
 import { Login, Register } from './pages/Auth';
 import { B2BOnboarding } from './pages/B2BOnboarding';
@@ -10,6 +11,7 @@ import { SettingsPage } from './pages/Settings';
 import { POSTerminal } from './pages/POSTerminal';
 import { Discovery } from './pages/Discovery';
 import { Landing } from './pages/Landing';
+import { Appointments } from './pages/Appointments';
 import { 
   Activity, 
   Shield, 
@@ -37,6 +39,7 @@ import {
 function Layout({ children, user, setUser }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t, i18n } = useTranslation();
   const isAuthPage = location.pathname === '/login' || location.pathname === '/register' || location.pathname === '/' || location.pathname === '/onboarding';
 
   useEffect(() => {
@@ -72,12 +75,12 @@ function Layout({ children, user, setUser }) {
           {user?.role === 'PATIENT' && (
             <div className={`sidebar-link ${location.pathname === '/discovery' ? 'active' : ''}`} onClick={() => navigate('/discovery')}>
               <MapPin className="sidebar-link-icon" size={18} />
-              <span>Find Clinics</span>
+              <span>{t('nav.find_clinic')}</span>
             </div>
           )}
           <div className={`sidebar-link ${location.pathname === '/consultations' ? 'active' : ''}`} onClick={() => navigate('/consultations')}>
             <MessageSquare className="sidebar-link-icon" size={18} />
-            <span>Consultations</span>
+            <span>{t('nav.my_consultations')}</span>
           </div>
           <div className={`sidebar-link ${location.pathname === '/appointments' ? 'active' : ''}`} onClick={() => navigate('/appointments')}>
             <Calendar className="sidebar-link-icon" size={18} />
@@ -86,7 +89,7 @@ function Layout({ children, user, setUser }) {
           {user?.role === 'DOCTOR' && (
             <div className={`sidebar-link ${location.pathname === '/pos' ? 'active' : ''}`} onClick={() => navigate('/pos')}>
               <CreditCard className="sidebar-link-icon" size={18} />
-              <span>POS Terminal</span>
+              <span>{t('nav.pos_dashboard')}</span>
             </div>
           )}
           
@@ -98,6 +101,11 @@ function Layout({ children, user, setUser }) {
         </nav>
         
         <div className="sidebar-footer">
+          <div style={{ marginBottom: '16px', display: 'flex', gap: '8px' }}>
+            <button className={`btn btn-sm ${i18n.language === 'en' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => i18n.changeLanguage('en')} style={{ padding: '4px 8px', fontSize: '11px' }}>EN</button>
+            <button className={`btn btn-sm ${i18n.language === 'hi' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => i18n.changeLanguage('hi')} style={{ padding: '4px 8px', fontSize: '11px' }}>हि</button>
+            <button className={`btn btn-sm ${i18n.language === 'ta' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => i18n.changeLanguage('ta')} style={{ padding: '4px 8px', fontSize: '11px' }}>தமிழ்</button>
+          </div>
           <div className="sidebar-user">
             <div className="sidebar-avatar">
               {user?.name?.charAt(0) || 'U'}
@@ -136,16 +144,7 @@ function Layout({ children, user, setUser }) {
   );
 }
 
-function Appointments() {
-  return (
-    <div className="card">
-      <div className="card-body">
-        <h2>Appointments</h2>
-        <p style={{ color: 'var(--color-text-secondary)', marginTop: '8px' }}>Your upcoming scheduled appointments will appear here.</p>
-      </div>
-    </div>
-  );
-}
+// Appointments component moved to pages/Appointments.jsx
 
 
 function App() {

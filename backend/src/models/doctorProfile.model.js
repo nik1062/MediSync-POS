@@ -5,12 +5,12 @@ const DoctorProfile = sequelize.define(
   'DoctorProfile',
   {
     id: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
-      autoIncrement: true,
     },
     userId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
       unique: true,
       field: 'user_id',

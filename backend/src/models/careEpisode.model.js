@@ -15,22 +15,26 @@ const CareEpisode = sequelize.define(
       field: 'clinic_id',
     },
     patientId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
       field: 'patient_id',
     },
     doctorId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
       field: 'doctor_id',
     },
+    familyMemberId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
     bookingId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: true,
       field: 'booking_id',
     },
     consultationId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: true,
       field: 'consultation_id',
     },
@@ -45,9 +49,15 @@ const CareEpisode = sequelize.define(
       field: 'invoice_id',
     },
     status: {
-      type: DataTypes.ENUM('BOOKED', 'IN_CONSULTATION', 'PRESCRIBED', 'BILLING', 'COMPLETED', 'CANCELLED'),
+      type: DataTypes.ENUM('BOOKED', 'IN_CONSULTATION', 'PRESCRIBED', 'BILLING', 'COMPLETED', 'CANCELLED', 'IN_PERSON_URGENT'),
       allowNull: false,
       defaultValue: 'BOOKED',
+    },
+    urgencyLevel: {
+      type: DataTypes.ENUM('ROUTINE', 'URGENT', 'EMERGENCY'),
+      allowNull: false,
+      defaultValue: 'ROUTINE',
+      field: 'urgency_level',
     },
   },
   {

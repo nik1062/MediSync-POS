@@ -20,19 +20,23 @@ const Prescription = sequelize.define(
       field: 'care_episode_id',
     },
     consultationId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
       field: 'consultation_id',
     },
     patientId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
       field: 'patient_id',
     },
     doctorId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
       field: 'doctor_id',
+    },
+    familyMemberId: {
+      type: DataTypes.UUID,
+      allowNull: true,
     },
     status: {
       type: DataTypes.ENUM('DRAFT', 'SIGNED', 'PARTIALLY_DISPENSED', 'DISPENSED'),

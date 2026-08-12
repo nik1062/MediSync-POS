@@ -15,7 +15,7 @@ const AuditLog = sequelize.define(
       field: 'clinic_id',
     },
     userId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
       field: 'user_id',
     },

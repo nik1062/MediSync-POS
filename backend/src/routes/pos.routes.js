@@ -48,4 +48,36 @@ router.post('/generate', posController.generateInvoice);
 router.put('/:id/pay', posController.payInvoice);
 router.get('/', posController.getClinicInvoices);
 
+// Shift Registers
+router.get('/shift', posController.getShiftStatus);
+router.post('/shift/open', posController.openShift);
+router.post('/shift/close', posController.closeShift);
+
+router.get('/patients/search', async (req, res) => {
+  const { User } = require('../models');
+  const { Op } = require('sequelize');
+  const clinicId = req.user.clinicId;
+  const { query } = req.query;
+  
+  if (!query) return res.json({ success: true, data: [] });
+  
+  const patients = await User.findAll({
+    where: {
+      clinicId,
+      role: 'PATIENT',
+      [Op.or]: [
+        { name: { [Op.like]: `%${query}%` } },
+        { phone: { [Op.like]: `%${query}%` } }
+      ]
+    },
+    attributes: ['id', 'name', 'phone', 'email'],
+    limit: 10
+  });
+  
+  res.json({ success: true, data: patients });
+});
+
+router.post('/inventory', posController.updateInventory);
+router.get('/analytics/daily-sales', posController.getDailySales);
+
 module.exports = router;

@@ -8,7 +8,7 @@ import {
   AlertTriangle,
   Loader2
 } from 'lucide-react';
-import { posAPI } from '../api';
+import { posAPI, consultationAPI } from '../api';
 
 export function POSCheckout({ 
   isOpen, 
@@ -20,11 +20,15 @@ export function POSCheckout({
   patientName,
   consultationId,
   invoiceId,
+  isPatientView,
   onPaymentSuccess 
 }) {
-  const [paymentMethod, setPaymentMethod] = useState('CASH'); // 'CASH' | 'CARD' | 'UPI'
+  const [paymentMethod, setPaymentMethod] = useState('CASH'); // 'CASH' | 'CARD' | 'UPI' | 'MIXED'
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  
+  // Split payment state
+  const [insuranceAmount, setInsuranceAmount] = useState(0);
 
   if (!isOpen) return null;
 
@@ -53,10 +57,26 @@ export function POSCheckout({
       })).filter(i => i.productId); // only send product items to deduct stock
 
       // 2. Perform checkout payment transaction update
-      const payRes = await posAPI.pay(targetInvoiceId, {
-        paymentMethod,
-        items: payItems
-      });
+      let payRes;
+      if (isPatientView) {
+        payRes = await consultationAPI.payPatientInvoice(consultationId, {
+          paymentMethod,
+          items: payItems,
+          ...(paymentMethod === 'MIXED' && {
+            insuranceClaimAmount: parseFloat(insuranceAmount || 0),
+            patientPayableAmount: Math.max(0, totalAmount - parseFloat(insuranceAmount || 0))
+          })
+        });
+      } else {
+        payRes = await posAPI.pay(targetInvoiceId, {
+          paymentMethod,
+          items: payItems,
+          ...(paymentMethod === 'MIXED' && {
+            insuranceClaimAmount: parseFloat(insuranceAmount || 0),
+            patientPayableAmount: Math.max(0, totalAmount - parseFloat(insuranceAmount || 0))
+          })
+        });
+      }
 
       // Complete checkout workflow
       onPaymentSuccess(payRes.data.data);
@@ -220,6 +240,34 @@ export function POSCheckout({
               <QrCode size={18} />
               <span>UPI QR</span>
             </button>
+
+            {/* Split button */}
+            <button
+              type="button"
+              onClick={() => setPaymentMethod('MIXED')}
+              style={{
+                padding: '12px 6px',
+                borderRadius: '10px',
+                border: '1px solid var(--color-border)',
+                background: paymentMethod === 'MIXED' ? 'rgba(13, 148, 136, 0.1)' : 'white',
+                borderColor: paymentMethod === 'MIXED' ? 'var(--color-primary)' : 'var(--color-border)',
+                color: paymentMethod === 'MIXED' ? 'var(--color-primary)' : 'var(--color-text-secondary)',
+                fontWeight: 600,
+                fontSize: '11px',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <div style={{ display: 'flex', gap: '2px' }}>
+                <Coins size={14} />
+                <CreditCard size={14} />
+              </div>
+              <span>Split / Ins.</span>
+            </button>
           </div>
 
           {/* Contextual Checkout Content */}
@@ -249,6 +297,32 @@ export function POSCheckout({
               <p style={{ margin: 0, fontSize: '11px', color: 'var(--color-text-secondary)', textAlign: 'center', fontWeight: 600 }}>
                 💵 Collect cash at the checkout counter and click Confirm below.
               </p>
+            </div>
+          )}
+
+          {paymentMethod === 'MIXED' && (
+            <div style={{ padding: '16px', background: 'var(--color-bg)', border: '1px solid var(--color-border-light)', borderRadius: '12px', marginBottom: '24px' }}>
+              <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: 'var(--color-text)', fontWeight: 600 }}>
+                Insurance Adjudication / Split Payment
+              </p>
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label" style={{ fontSize: '11px' }}>Amount Covered by Insurance ($)</label>
+                <input 
+                  type="number" 
+                  step="0.01" 
+                  className="form-input" 
+                  style={{ fontSize: '14px', padding: '8px' }}
+                  value={insuranceAmount}
+                  onChange={e => setInsuranceAmount(e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed var(--color-border)', paddingTop: '12px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>Patient Co-Pay Due:</span>
+                <strong style={{ fontSize: '16px', color: 'var(--color-danger)' }}>
+                  ${Math.max(0, totalAmount - parseFloat(insuranceAmount || 0)).toFixed(2)}
+                </strong>
+              </div>
             </div>
           )}
 

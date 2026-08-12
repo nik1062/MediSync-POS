@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { doctorAPI, consultationAPI, availabilityAPI } from '../api';
+import { doctorAPI, consultationAPI, availabilityAPI, authAPI, prescriptionsAPI } from '../api';
 import { MessageSquare, Activity, Clock, ArrowRight, Calendar, X, AlertTriangle, Check, Sliders, Settings } from 'lucide-react';
 
 export function Dashboard({ user }) {
   const navigate = useNavigate();
   const [consultations, setConsultations] = useState([]);
   const [doctors, setDoctors] = useState([]);
+  const [prescriptions, setPrescriptions] = useState([]);
   
   // Booking Modal States
   const [selectedDoctor, setSelectedDoctor] = useState(null);
@@ -34,6 +35,7 @@ export function Dashboard({ user }) {
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [scheduleSuccess, setScheduleSuccess] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState(false);
+  const [isOnline, setIsOnline] = useState(user?.isOnline || false);
 
   useEffect(() => {
     fetchData();
@@ -51,6 +53,8 @@ export function Dashboard({ user }) {
       setConsultations(consRes.data.data);
       if (user.role === 'PATIENT') {
         setDoctors(docsRes.data.data);
+        const presRes = await prescriptionsAPI.getMyPrescriptions();
+        setPrescriptions(presRes.data.data || []);
       }
     } catch (err) {
       console.error(err);
@@ -222,14 +226,49 @@ export function Dashboard({ user }) {
   if (!user) return null;
 
   // Filter consultations into Upcoming (Pending/Active) vs History (Completed/Cancelled)
-  const upcomingConsultations = consultations.filter(c => c.status === 'PENDING' || c.status === 'ACTIVE');
-  const pastConsultations = consultations.filter(c => c.status === 'COMPLETED' || c.status === 'CANCELLED');
+  const upcomingConsultations = consultations
+    .filter(c => c.status === 'PENDING' || c.status === 'ACTIVE')
+    .sort((a, b) => {
+      if (a.urgencyLevel === 'URGENT' && b.urgencyLevel !== 'URGENT') return -1;
+      if (b.urgencyLevel === 'URGENT' && a.urgencyLevel !== 'URGENT') return 1;
+      return new Date(a.scheduledAt || a.createdAt) - new Date(b.scheduledAt || b.createdAt);
+    });
+  const pastConsultations = consultations.filter(c => c.status === 'COMPLETED' || c.status === 'CANCELLED' || c.status === 'IN_PERSON_URGENT');
 
   return (
     <div>
-      <div style={{ marginBottom: '32px' }}>
-        <h1 style={{ marginBottom: '8px', color: 'var(--color-text)', letterSpacing: '-0.5px' }}>Workspace Dashboard</h1>
-        <p style={{ color: 'var(--color-text-secondary)' }}>Welcome back, {user.name}. Here is your clinical summary.</p>
+      <div style={{ marginBottom: '32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h1 style={{ marginBottom: '8px', color: 'var(--color-text)', letterSpacing: '-0.5px' }}>Workspace Dashboard</h1>
+          <p style={{ color: 'var(--color-text-secondary)', margin: 0 }}>Welcome back, {user.name}. Here is your clinical summary.</p>
+        </div>
+        
+        {user.role === 'DOCTOR' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--color-white)', padding: '12px 20px', borderRadius: '12px', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: '14px', fontWeight: 700 }}>Presence Status</span>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>{isOnline ? 'Online (Accepting Instant)' : 'Offline'}</span>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input 
+                type="checkbox" 
+                checked={isOnline}
+                onChange={async () => {
+                  try {
+                    const res = await authAPI.toggleOnline();
+                    setIsOnline(res.data.data.isOnline);
+                  } catch (err) {
+                    console.error("Failed to toggle status", err);
+                  }
+                }}
+                style={{ display: 'none' }}
+              />
+              <div style={{ width: '44px', height: '24px', borderRadius: '12px', background: isOnline ? '#10b981' : '#cbd5e1', position: 'relative', transition: 'background 0.3s' }}>
+                <div style={{ position: 'absolute', top: '2px', left: isOnline ? '22px' : '2px', width: '20px', height: '20px', borderRadius: '50%', background: 'white', transition: 'left 0.3s', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}></div>
+              </div>
+            </label>
+          </div>
+        )}
       </div>
 
       <div className="stats-grid">
@@ -265,7 +304,39 @@ export function Dashboard({ user }) {
       <div style={{ display: 'grid', gridTemplateColumns: user.role === 'PATIENT' ? '2fr 1fr' : '1.8fr 1.2fr', gap: '28px', alignItems: 'start' }}>
         {/* Left Column: Scheduled Appointments & History */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-          
+          {user.role === 'PATIENT' && (
+            <div className="data-table-wrapper" style={{ borderTop: '4px solid #10b981' }}>
+              <div className="data-table-header" style={{ background: '#ecfdf5', borderBottom: '1px solid #d1fae5' }}>
+                <h2 className="data-table-title" style={{ color: '#047857', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Activity size={18} />
+                  <span>Medication Schedule</span>
+                </h2>
+              </div>
+              <div style={{ padding: '16px' }}>
+                {prescriptions.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--color-text-muted)' }}>No active medications.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {prescriptions.flatMap(p => p.items).map((item, idx) => (
+                      <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+                        <div>
+                          <strong style={{ display: 'block', fontSize: '14px' }}>{item.product?.name || 'Unknown Drug'}</strong>
+                          <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                            {item.dosage} &middot; {item.frequency}
+                          </span>
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 500, color: '#10b981' }}>
+                          <input type="checkbox" style={{ accentColor: '#10b981', width: '16px', height: '16px' }} />
+                          Taken Today
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Section: Scheduled Sessions */}
           <div className="data-table-wrapper">
             <div className="data-table-header" style={{ background: 'var(--color-primary-50)', borderBottom: '1px solid var(--color-border)' }}>
@@ -304,7 +375,12 @@ export function Dashboard({ user }) {
                           <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '12px' }}>
                             {(user.role === 'PATIENT' ? c.doctor?.name : c.patient?.name)?.charAt(0)}
                           </div>
-                          <span>{user.role === 'PATIENT' ? c.doctor?.name : c.patient?.name}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span>{user.role === 'PATIENT' ? c.doctor?.name : c.patient?.name}</span>
+                            {c.urgencyLevel === 'URGENT' && (
+                              <span style={{ fontSize: '10px', color: '#b45309', fontWeight: 600, background: '#fffbeb', padding: '2px 6px', borderRadius: '4px', width: 'fit-content', marginTop: '2px' }}>URGENT</span>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td>
@@ -521,6 +597,32 @@ export function Dashboard({ user }) {
                   </button>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Home Lab Test (Patient only) */}
+        {user.role === 'PATIENT' && (
+          <div className="card" style={{ padding: '24px', background: 'var(--color-white)', marginTop: '28px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', margin: '0 0 16px 0', borderBottom: '1px solid var(--color-border)', paddingBottom: '12px' }}>Home Services</h3>
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px dashed #cbd5e1', textAlign: 'center' }}>
+              <Activity size={24} style={{ color: '#10b981', margin: '0 auto 8px auto' }} />
+              <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 600 }}>Home Lab Collection</h4>
+              <p style={{ margin: '0 0 16px 0', fontSize: '12px', color: 'var(--color-text-secondary)' }}>Book a phlebotomist to collect your lab samples from home.</p>
+              <select className="form-input" style={{ marginBottom: '12px', fontSize: '12px' }} defaultValue="">
+                <option value="" disabled>Select Lab Test...</option>
+                <option value="cbc">Complete Blood Count (CBC)</option>
+                <option value="lipid">Lipid Profile</option>
+                <option value="thyroid">Thyroid Panel (T3, T4, TSH)</option>
+                <option value="sugar">Fasting Blood Sugar</option>
+              </select>
+              <button 
+                className="btn btn-primary btn-sm" 
+                style={{ width: '100%' }}
+                onClick={() => alert('Mock: Phlebotomist booked for home collection!')}
+              >
+                Request Collection
+              </button>
             </div>
           </div>
         )}

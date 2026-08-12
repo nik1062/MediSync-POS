@@ -5,45 +5,44 @@ const Consultation = sequelize.define(
   'Consultation',
   {
     id: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
-      autoIncrement: true,
+    },
+    appointmentId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: 'appointment_id',
     },
     patientId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
       field: 'patient_id',
     },
     doctorId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
       field: 'doctor_id',
     },
-    status: {
-      type: DataTypes.ENUM('PENDING', 'ACTIVE', 'COMPLETED', 'CANCELLED'),
-      allowNull: false,
-      defaultValue: 'PENDING',
-    },
-    scheduledAt: {
+    startedAt: {
       type: DataTypes.DATE,
       allowNull: true,
-      field: 'scheduled_at',
+      field: 'started_at',
     },
-    notes: {
+    endedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'ended_at',
+    },
+    status: {
+      type: DataTypes.ENUM('ACTIVE', 'COMPLETED', 'CANCELLED'),
+      allowNull: false,
+      defaultValue: 'ACTIVE',
+    },
+    soapData: {
       type: DataTypes.TEXT,
       allowNull: true,
-      defaultValue: '{}',
-    },
-    paymentStatus: {
-      type: DataTypes.ENUM('UNPAID', 'PAID'),
-      allowNull: false,
-      defaultValue: 'UNPAID',
-      field: 'payment_status',
-    },
-    fee: {
-      type: DataTypes.DECIMAL(10, 2),
-      allowNull: false,
-      defaultValue: 15.00,
+      field: 'soap_data',
     },
   },
   {

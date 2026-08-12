@@ -16,7 +16,12 @@ export function ConsultationsList({ user }) {
     if (!user) return;
     try {
       const { data } = await consultationAPI.getAll();
-      setConsultations(data.data);
+      const sorted = data.data.sort((a, b) => {
+        if (a.urgencyLevel === 'URGENT' && b.urgencyLevel !== 'URGENT') return -1;
+        if (b.urgencyLevel === 'URGENT' && a.urgencyLevel !== 'URGENT') return 1;
+        return new Date(b.createdAt) - new Date(a.createdAt);
+      });
+      setConsultations(sorted);
     } catch (err) {
       console.error(err);
     }
@@ -28,6 +33,28 @@ export function ConsultationsList({ user }) {
       fetchData();
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to update status');
+    }
+  };
+
+  const submitRating = async (consultationId, doctorId) => {
+    const ratingStr = prompt('Rate this doctor from 1 to 5:');
+    if (!ratingStr) return;
+    const rating = parseInt(ratingStr);
+    if (isNaN(rating) || rating < 1 || rating > 5) {
+      alert('Invalid rating.');
+      return;
+    }
+    const comment = prompt('Optional comment:');
+    try {
+      const token = localStorage.getItem('token');
+      await fetch('http://localhost:5000/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ doctorId, careEpisodeId: consultationId, rating, comment })
+      });
+      alert('Review submitted successfully!');
+    } catch (err) {
+      alert('Failed to submit review.');
     }
   };
 
@@ -54,6 +81,7 @@ export function ConsultationsList({ user }) {
               <tr>
                 <th>Consultation ID</th>
                 <th>{user.role === 'PATIENT' ? 'Provider Name' : 'Patient Name'}</th>
+                {user.role === 'PATIENT' && <th>For</th>}
                 <th>Creation Date</th>
                 <th>Current Status</th>
                 <th>Actions</th>
@@ -62,7 +90,7 @@ export function ConsultationsList({ user }) {
             <tbody>
               {consultations.length === 0 && (
                 <tr>
-                  <td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                  <td colSpan={user.role === 'PATIENT' ? "6" : "5"} style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                     No consultation records found.
                   </td>
                 </tr>
@@ -86,11 +114,21 @@ export function ConsultationsList({ user }) {
                       }}>
                         {(user.role === 'PATIENT' ? c.doctor?.name : c.patient?.name)?.charAt(0) || '?'}
                       </div>
-                      <span style={{ fontWeight: 500 }}>
-                        {user.role === 'PATIENT' ? c.doctor?.name || 'Unknown' : c.patient?.name || 'Unknown'}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontWeight: 500 }}>
+                          {user.role === 'PATIENT' ? c.doctor?.name || 'Unknown' : (c.familyMember ? `${c.familyMember.name} (Dependent of ${c.patient?.name})` : c.patient?.name || 'Unknown')}
+                        </span>
+                        {c.urgencyLevel === 'URGENT' && (
+                          <span style={{ fontSize: '10px', color: '#b45309', fontWeight: 600, background: '#fffbeb', padding: '2px 6px', borderRadius: '4px', width: 'fit-content', marginTop: '2px' }}>URGENT</span>
+                        )}
+                      </div>
                     </div>
                   </td>
+                  {user.role === 'PATIENT' && (
+                    <td style={{ color: 'var(--color-text-secondary)' }}>
+                      {c.familyMember ? c.familyMember.name : 'Myself'}
+                    </td>
+                  )}
                   <td style={{ color: 'var(--color-text-secondary)' }}>
                     {new Date(c.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
                   </td>
@@ -105,6 +143,15 @@ export function ConsultationsList({ user }) {
                       >
                         {c.status === 'COMPLETED' ? 'View Record' : 'Join Room'}
                       </button>
+                      {user.role === 'PATIENT' && c.status === 'COMPLETED' && (
+                        <button 
+                          className="btn btn-secondary btn-sm" 
+                          style={{ padding: '6px 12px' }} 
+                          onClick={() => submitRating(c.id, c.doctorId)}
+                        >
+                          Rate Doctor
+                        </button>
+                      )}
                       {user.role === 'DOCTOR' && c.status !== 'COMPLETED' && (
                         <select 
                           style={{ 

@@ -104,4 +104,19 @@ const addItem = catchAsync(async (req, res) => {
   }
 });
 
-module.exports = { createDraft, addItem };
+const getMyPrescriptions = catchAsync(async (req, res) => {
+  const patientId = req.user.id;
+  const prescriptions = await Prescription.findAll({
+    where: { patientId },
+    include: [{
+      model: PrescriptionItem,
+      as: 'items',
+      include: [{ model: Product, as: 'product', attributes: ['name', 'manufacturer'] }]
+    }],
+    order: [['createdAt', 'DESC']]
+  });
+
+  res.status(200).json({ success: true, data: prescriptions });
+});
+
+module.exports = { createDraft, addItem, getMyPrescriptions };

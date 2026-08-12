@@ -22,21 +22,41 @@ const Product = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
-    price: {
+    barcode: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    category: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    sellingPrice: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
       defaultValue: 0.00,
+      field: 'selling_price',
     },
-    stockQuantity: {
+    purchasePrice: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.00,
+      field: 'purchase_price',
+    },
+    stockCount: {
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: 0,
-      field: 'stock_quantity',
+      field: 'stock_count',
     },
-    lowStockThreshold: {
+    minimumStock: {
       type: DataTypes.INTEGER,
       defaultValue: 5,
-      field: 'low_stock_threshold',
+      field: 'minimum_stock',
+    },
+    supplierId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: 'supplier_id',
     },
     scheduleClass: {
       type: DataTypes.ENUM('OTC', 'H', 'H1', 'X'),

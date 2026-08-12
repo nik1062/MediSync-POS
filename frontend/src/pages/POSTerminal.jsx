@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { POSCheckout } from './POSCheckout';
-import { posAPI } from '../api';
+import { posAPI, productAPI } from '../api';
 import { 
   Plus, 
   Minus, 
@@ -37,9 +37,48 @@ export function POSTerminal({ user }) {
   // Patient Lookup State
   const [searchQuery, setSearchQuery] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
+  const [patientResults, setPatientResults] = useState([]);
+
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (searchQuery.length >= 2) {
+        try {
+          const { data } = await posAPI.searchPatients(searchQuery);
+          setPatientResults(data.data || []);
+        } catch (err) {
+          console.error(err);
+        }
+      } else {
+        setPatientResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery]);
 
   // Controlled Substance Confirmation Modal
   const [showControlledModal, setShowControlledModal] = useState(false);
+
+  // Shift Management State
+  const [shift, setShift] = useState(null);
+  const [showShiftModal, setShowShiftModal] = useState(false);
+  const [openingBalance, setOpeningBalance] = useState('');
+  const [closingBalance, setClosingBalance] = useState('');
+  const [shiftAction, setShiftAction] = useState('OPEN'); // 'OPEN' or 'CLOSE'
+
+  const fetchShiftStatus = async () => {
+    try {
+      const { data } = await posAPI.getShift();
+      if (data.data) {
+        setShift(data.data);
+      } else {
+        setShift(null);
+        setShiftAction('OPEN');
+        setShowShiftModal(true);
+      }
+    } catch (err) {
+      console.error('Failed to load shift status:', err);
+    }
+  };
 
   const fetchRecentInvoices = async () => {
     try {
@@ -52,40 +91,171 @@ export function POSTerminal({ user }) {
 
   useEffect(() => {
     if (user && (user.role === 'DOCTOR' || user.role === 'PHARMACIST')) {
+      fetchShiftStatus();
       fetchRecentInvoices();
     }
   }, [user]);
 
-  // Derive pending patients from unpaid invoices
-  const pendingPatients = recentInvoices.filter(inv => inv.paymentStatus === 'UNPAID' && inv.patientName !== 'Walk-in Patient');
-  const filteredPatients = pendingPatients.filter(inv => inv.patientName.toLowerCase().includes(searchQuery.toLowerCase()));
+  const handleOpenShift = async (e) => {
+    e.preventDefault();
+    try {
+      const { data } = await posAPI.openShift({ openingBalance: parseFloat(openingBalance || 0) });
+      setShift(data.data);
+      setShowShiftModal(false);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to open shift');
+    }
+  };
 
-  const handleSelectPatient = async (invoice) => {
-    setSearchQuery(invoice.patientName);
-    setPatientName(invoice.patientName);
-    setActiveInvoiceId(invoice.id);
+  const handleCloseShift = async (e) => {
+    e.preventDefault();
+    try {
+      const { data } = await posAPI.closeShift({ expectedClosingBalance: parseFloat(closingBalance || 0) });
+      
+      // Print Z-Report
+      const closedShift = data.data;
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Z-Report: Shift #${closedShift.id}</title>
+            <style>
+              body { font-family: 'Courier New', Courier, monospace; padding: 20px; max-width: 320px; font-size: 13px; line-height: 1.4; color: #111; }
+              .text-center { text-align: center; }
+              .divider { border-bottom: 1px dashed #333; margin: 12px 0; }
+              .item-row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+              .title { font-size: 16px; font-weight: bold; margin-bottom: 4px; }
+            </style>
+          </head>
+          <body onload="window.print()">
+            <div class="text-center">
+              <div class="title">MEDISYNC Z-REPORT</div>
+              <div>End of Shift Reconciliation</div>
+            </div>
+            <div class="divider"></div>
+            <div>Opened: ${new Date(closedShift.openedAt).toLocaleString()}</div>
+            <div>Closed: ${new Date(closedShift.closedAt).toLocaleString()}</div>
+            <div>Cashier ID: ${closedShift.userId.substring(0,8)}</div>
+            <div class="divider"></div>
+            <div class="item-row">
+              <div>Opening Balance:</div>
+              <div>$${parseFloat(closedShift.openingBalance).toFixed(2)}</div>
+            </div>
+            <div class="item-row">
+              <div>Total Cash Sales:</div>
+              <div>$${parseFloat(closedShift.totalCashSales).toFixed(2)}</div>
+            </div>
+            <div class="item-row">
+              <div>Total Card Sales:</div>
+              <div>$${parseFloat(closedShift.totalCardSales).toFixed(2)}</div>
+            </div>
+            <div class="item-row">
+              <div>Total UPI Sales:</div>
+              <div>$${parseFloat(closedShift.totalUpiSales).toFixed(2)}</div>
+            </div>
+            <div class="divider"></div>
+            <div class="item-row" style="font-weight: bold; font-size: 15px;">
+              <div>Expected Cash:</div>
+              <div>$${parseFloat(closedShift.closingBalance).toFixed(2)}</div>
+            </div>
+            <div class="item-row" style="font-weight: bold;">
+              <div>Actual Declared:</div>
+              <div>$${parseFloat(closedShift.expectedClosingBalance).toFixed(2)}</div>
+            </div>
+            <div class="divider"></div>
+            <div class="text-center" style="font-size: 11px;">
+              <div>Difference: $${(parseFloat(closedShift.expectedClosingBalance) - parseFloat(closedShift.closingBalance)).toFixed(2)}</div>
+              <div style="margin-top: 8px;">Signature: ________________</div>
+            </div>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+
+      setShift(null);
+      setShiftAction('OPEN');
+      setOpeningBalance('');
+      setClosingBalance('');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to close shift');
+    }
+  };
+
+  // Barcode Scanner Listener
+  const barcodeBufferRef = useRef('');
+  const barcodeTimeoutRef = useRef(null);
+
+  const handleBarcodeScan = async (barcode) => {
+    try {
+      const { data } = await productAPI.search(barcode);
+      if (data.data && data.data.length > 0) {
+        // Find exact SKU match if possible, otherwise first result
+        const product = data.data.find(p => p.sku === barcode) || data.data[0];
+        addToCart(product);
+      } else {
+        alert(`No product found for barcode: ${barcode}`);
+      }
+    } catch (err) {
+      console.error('Barcode scan failed:', err);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ignore if user is typing in an input field
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'Enter') {
+        if (barcodeBufferRef.current.length >= 3) {
+          handleBarcodeScan(barcodeBufferRef.current);
+        }
+        barcodeBufferRef.current = '';
+        if (barcodeTimeoutRef.current) clearTimeout(barcodeTimeoutRef.current);
+        return;
+      }
+
+      if (e.key.length === 1 && /[a-zA-Z0-9\-]/.test(e.key)) {
+        barcodeBufferRef.current += e.key;
+        
+        if (barcodeTimeoutRef.current) clearTimeout(barcodeTimeoutRef.current);
+        barcodeTimeoutRef.current = setTimeout(() => {
+          barcodeBufferRef.current = '';
+        }, 50); // 50ms threshold for physical barcode scanners
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (barcodeTimeoutRef.current) clearTimeout(barcodeTimeoutRef.current);
+    };
+  }, []);
+
+  // Not deriving from recentInvoices anymore because we are using global search
+  const handleSelectPatient = async (patient) => {
+    setSearchQuery(patient.name);
+    setPatientName(patient.name);
     setShowDropdown(false);
 
-    if (invoice.consultationId) {
-      try {
-        const { data } = await posAPI.lookup(null, invoice.consultationId);
-        const episode = data.data;
-        
-        const newCart = [];
-        
-        // Add consultation fee if invoice has it but it's not paid yet
-        if (invoice.items) {
-           invoice.items.forEach(invItem => {
-             // For walk-in or manual items previously added to this invoice
-             newCart.push({
-               id: `invItem_${invItem.id}`,
-               name: invItem.itemName,
-               price: parseFloat(invItem.price),
-               quantity: 1,
-               isExistingInvoiceItem: true,
-             });
+    try {
+      const { data } = await posAPI.lookup(patient.id, null);
+      const episode = data.data;
+      
+      const newCart = [];
+      setActiveInvoiceId(episode.invoice?.id || null);
+      
+      // Add consultation fee if invoice has it but it's not paid yet
+      if (episode.invoice && episode.invoice.paymentStatus === 'UNPAID' && episode.invoice.items) {
+         episode.invoice.items.forEach(invItem => {
+           newCart.push({
+             id: `invItem_${invItem.id}`,
+             name: invItem.itemName,
+             price: parseFloat(invItem.price),
+             quantity: 1,
+             isExistingInvoiceItem: true,
            });
-        }
+         });
+      }
 
         // Auto-load prescribed medications
         if (episode.prescriptionRecord && episode.prescriptionRecord.items) {
@@ -108,10 +278,13 @@ export function POSTerminal({ user }) {
         
         setCart(newCart);
       } catch (err) {
-        console.error('Failed to lookup care episode for patient', err);
-        alert('Failed to load patient prescription cart.');
+        if (err.response?.status === 404) {
+          alert('No active care episode found for this patient.');
+        } else {
+          console.error('Failed to lookup care episode for patient', err);
+          alert('Failed to load patient prescription cart.');
+        }
       }
-    }
   };
 
   // Cart operations
@@ -252,6 +425,16 @@ export function POSTerminal({ user }) {
           <h1 style={{ marginBottom: '6px', color: 'var(--color-text)', letterSpacing: '-0.5px' }}>Clinical POS Terminal</h1>
           <p style={{ color: 'var(--color-text-secondary)', fontSize: '13px' }}>Issue quick walk-in billing tickets, collect payments, and dispense prescriptions.</p>
         </div>
+        {shift && (
+          <button 
+            type="button" 
+            className="btn btn-outline" 
+            style={{ padding: '8px 16px', display: 'flex', gap: '8px', alignItems: 'center', color: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
+            onClick={() => { setShiftAction('CLOSE'); setShowShiftModal(true); }}
+          >
+            <Trash2 size={16} /> Close Register Shift
+          </button>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '28px', alignItems: 'start' }}>
@@ -357,6 +540,16 @@ export function POSTerminal({ user }) {
             <span>Active Checkout Cart</span>
           </h2>
 
+          <div style={{ padding: '12px', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)', padding: '8px', borderRadius: '6px' }}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5v14"/><path d="M8 5v14"/><path d="M12 5v14"/><path d="M17 5v14"/><path d="M21 5v14"/></svg>
+            </div>
+            <div>
+              <strong style={{ fontSize: '12px', color: 'var(--color-text)', display: 'block' }}>Barcode Scanner Ready</strong>
+              <span style={{ fontSize: '10px', color: 'var(--color-text-secondary)' }}>Point HID scanner and scan SKU</span>
+            </div>
+          </div>
+
           <div className="form-group" style={{ marginBottom: '20px', position: 'relative' }}>
             <label className="form-label">Patient Lookup (Auto-load Cart)</label>
             <div style={{ position: 'relative' }}>
@@ -381,17 +574,17 @@ export function POSTerminal({ user }) {
             </div>
 
             {/* Autocomplete Dropdown */}
-            {showDropdown && searchQuery && filteredPatients.length > 0 && (
+            {showDropdown && searchQuery && patientResults.length > 0 && (
               <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--color-white)', border: '1px solid var(--color-border)', borderRadius: '8px', boxShadow: 'var(--shadow-lg)', zIndex: 10, marginTop: '4px', maxHeight: '200px', overflowY: 'auto' }}>
-                {filteredPatients.map(inv => (
+                {patientResults.map(p => (
                   <div 
-                    key={inv.id} 
-                    onClick={() => handleSelectPatient(inv)}
+                    key={p.id} 
+                    onClick={() => handleSelectPatient(p)}
                     style={{ padding: '12px', borderBottom: '1px solid var(--color-border-light)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                   >
                     <div>
-                      <strong style={{ display: 'block', fontSize: '13px', color: 'var(--color-text)' }}>{inv.patientName}</strong>
-                      <span style={{ fontSize: '11px', color: 'var(--color-warning)' }}>Pending Payment</span>
+                      <strong style={{ display: 'block', fontSize: '13px', color: 'var(--color-text)' }}>{p.name}</strong>
+                      <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>{p.phone || p.email}</span>
                     </div>
                     <UserCheck size={16} style={{ color: 'var(--color-primary)' }} />
                   </div>
@@ -487,7 +680,7 @@ export function POSTerminal({ user }) {
       {/* Controlled Substance Warning Modal */}
       {showControlledModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: 'var(--color-white)', borderRadius: '16px', padding: '32px', width: '100%', maxW: '480px', boxShadow: 'var(--shadow-xl)', position: 'relative' }}>
+          <div style={{ background: 'var(--color-white)', borderRadius: '16px', padding: '32px', width: '100%', maxWidth: '480px', boxShadow: 'var(--shadow-xl)', position: 'relative' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
               <div style={{ background: 'var(--color-warning-bg)', padding: '16px', borderRadius: '50%', color: 'var(--color-warning)' }}>
                 <ShieldAlert size={48} />
@@ -522,6 +715,44 @@ export function POSTerminal({ user }) {
                 Verify & Proceed
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Shift Management Modal */}
+      {showShiftModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: 'var(--color-white)', borderRadius: '16px', padding: '32px', width: '100%', maxWidth: '400px', boxShadow: 'var(--shadow-xl)' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '16px', color: 'var(--color-text)', textAlign: 'center' }}>
+              {shiftAction === 'OPEN' ? 'Open Register Shift' : 'Close Register Shift (Z-Report)'}
+            </h2>
+            <p style={{ fontSize: '14px', color: 'var(--color-text-secondary)', textAlign: 'center', marginBottom: '24px' }}>
+              {shiftAction === 'OPEN' ? 'Enter the starting cash float in the drawer.' : 'Enter the actual cash currently in the drawer.'}
+            </p>
+            
+            <form onSubmit={shiftAction === 'OPEN' ? handleOpenShift : handleCloseShift}>
+              <div className="form-group" style={{ marginBottom: '24px' }}>
+                <label className="form-label">{shiftAction === 'OPEN' ? 'Opening Balance ($)' : 'Actual Cash in Drawer ($)'}</label>
+                <input 
+                  type="number" 
+                  step="0.01" 
+                  className="form-input" 
+                  style={{ fontSize: '18px', padding: '12px', textAlign: 'center', fontWeight: 'bold' }}
+                  value={shiftAction === 'OPEN' ? openingBalance : closingBalance}
+                  onChange={e => shiftAction === 'OPEN' ? setOpeningBalance(e.target.value) : setClosingBalance(e.target.value)}
+                  placeholder="0.00"
+                  required
+                  autoFocus
+                />
+              </div>
+              <button 
+                type="submit" 
+                className="btn btn-primary" 
+                style={{ width: '100%', padding: '14px', fontSize: '16px', background: shiftAction === 'CLOSE' ? 'var(--color-danger)' : 'var(--color-primary)', borderColor: shiftAction === 'CLOSE' ? 'var(--color-danger)' : 'var(--color-primary)' }}
+              >
+                {shiftAction === 'OPEN' ? 'Open Shift' : 'Print Z-Report & Close Shift'}
+              </button>
+            </form>
           </div>
         </div>
       )}

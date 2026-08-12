@@ -1,6 +1,7 @@
 const sequelize = require('../config/database');
 const User = require('./user.model');
 const DoctorProfile = require('./doctorProfile.model');
+const Appointment = require('./appointment.model');
 const Consultation = require('./consultation.model');
 const Message = require('./message.model');
 const DoctorAvailability = require('./doctorAvailability.model');
@@ -12,6 +13,12 @@ const CareEpisode = require('./careEpisode.model');
 const Prescription = require('./prescription.model');
 const PrescriptionItem = require('./prescriptionItem.model');
 const AuditLog = require('./auditLog.model');
+const InventoryBatch = require('./inventoryBatch.model');
+const CashRegisterShift = require('./cashRegisterShift.model');
+const FamilyMember = require('./familyMember.model')(sequelize);
+const Document = require('./document.model')(sequelize);
+const Review = require('./review.model')(sequelize);
+const StockMovement = require('./stockMovement.model');
 
 // ── Clinic Relationships ──────────────────────────────────────────
 Clinic.hasMany(Product, { foreignKey: 'clinicId', as: 'products' });
@@ -27,9 +34,22 @@ Invoice.belongsTo(Clinic, { foreignKey: 'clinicId', as: 'clinic' });
 User.hasOne(DoctorProfile, { foreignKey: 'userId', as: 'doctorProfile' });
 DoctorProfile.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
+// ── Family Relationships ──────────────────────────────────────────
+User.hasMany(FamilyMember, { foreignKey: 'primaryUserId', as: 'familyMembers' });
+FamilyMember.belongsTo(User, { foreignKey: 'primaryUserId', as: 'primaryUser' });
+
+// ── Appointment Relationships ───────────────────────────────────────
+User.hasMany(Appointment, { foreignKey: 'patientId', as: 'appointmentsAsPatient' });
+User.hasMany(Appointment, { foreignKey: 'doctorId', as: 'appointmentsAsDoctor' });
+Appointment.belongsTo(User, { foreignKey: 'patientId', as: 'patient' });
+Appointment.belongsTo(User, { foreignKey: 'doctorId', as: 'doctor' });
+Clinic.hasMany(Appointment, { foreignKey: 'clinicId', as: 'appointments' });
+Appointment.belongsTo(Clinic, { foreignKey: 'clinicId', as: 'clinic' });
+
 // ── Consultation Relationships ────────────────────────────────────
-// NOTE: There is no separate Booking/Appointment model in this codebase.
-// Consultation serves as both the booking record and the video-call record.
+Appointment.hasOne(Consultation, { foreignKey: 'appointmentId', as: 'consultation' });
+Consultation.belongsTo(Appointment, { foreignKey: 'appointmentId', as: 'appointment' });
+
 User.hasMany(Consultation, { foreignKey: 'patientId', as: 'consultationsAsPatient' });
 User.hasMany(Consultation, { foreignKey: 'doctorId', as: 'consultationsAsDoctor' });
 Consultation.belongsTo(User, { foreignKey: 'patientId', as: 'patient' });
@@ -65,10 +85,10 @@ User.hasMany(CareEpisode, { foreignKey: 'patientId', as: 'careEpisodesAsPatient'
 CareEpisode.belongsTo(User, { foreignKey: 'doctorId', as: 'doctor' });
 User.hasMany(CareEpisode, { foreignKey: 'doctorId', as: 'careEpisodesAsDoctor' });
 
-// bookingId and consultationId both reference Consultation.id (see note above).
-// Kept as two distinct FKs since that's how careEpisode.model.js defines them,
-// but both will typically hold the same value in this codebase.
-CareEpisode.belongsTo(Consultation, { foreignKey: 'bookingId', as: 'booking' });
+FamilyMember.hasMany(CareEpisode, { foreignKey: 'familyMemberId', as: 'careEpisodes' });
+CareEpisode.belongsTo(FamilyMember, { foreignKey: 'familyMemberId', as: 'familyMember' });
+
+CareEpisode.belongsTo(Appointment, { foreignKey: 'bookingId', as: 'booking' });
 CareEpisode.belongsTo(Consultation, { foreignKey: 'consultationId', as: 'consultation' });
 
 CareEpisode.belongsTo(Invoice, { foreignKey: 'invoiceId', as: 'invoice' });
@@ -89,6 +109,9 @@ Prescription.belongsTo(Consultation, { foreignKey: 'consultationId', as: 'consul
 Prescription.belongsTo(User, { foreignKey: 'patientId', as: 'patient' });
 Prescription.belongsTo(User, { foreignKey: 'doctorId', as: 'doctor' });
 
+FamilyMember.hasMany(Prescription, { foreignKey: 'familyMemberId', as: 'prescriptions' });
+Prescription.belongsTo(FamilyMember, { foreignKey: 'familyMemberId', as: 'familyMember' });
+
 // ── PrescriptionItem Relationships ────────────────────────────────
 PrescriptionItem.belongsTo(Clinic, { foreignKey: 'clinicId', as: 'clinic' });
 Clinic.hasMany(PrescriptionItem, { foreignKey: 'clinicId', as: 'prescriptionItems' });
@@ -106,10 +129,40 @@ Clinic.hasMany(AuditLog, { foreignKey: 'clinicId', as: 'auditLogs' });
 AuditLog.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 User.hasMany(AuditLog, { foreignKey: 'userId', as: 'auditLogs' });
 
+// ── Inventory relationships ─────────────────────────────────────────
+InventoryBatch.belongsTo(Product, { foreignKey: 'productId', as: 'product' });
+Product.hasMany(InventoryBatch, { foreignKey: 'productId', as: 'batches' });
+InventoryBatch.belongsTo(Clinic, { foreignKey: 'clinicId', as: 'clinic' });
+
+// ── Document Relationships ──────────────────────────────────────────
+User.hasMany(Document, { foreignKey: 'userId', as: 'documents' });
+Document.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+FamilyMember.hasMany(Document, { foreignKey: 'familyMemberId', as: 'documents' });
+Document.belongsTo(FamilyMember, { foreignKey: 'familyMemberId', as: 'familyMember' });
+
+// ── Review Relationships ────────────────────────────────────────────
+User.hasMany(Review, { foreignKey: 'doctorId', as: 'reviewsReceived' });
+Review.belongsTo(User, { foreignKey: 'doctorId', as: 'doctor' });
+
+User.hasMany(Review, { foreignKey: 'patientId', as: 'reviewsGiven' });
+Review.belongsTo(User, { foreignKey: 'patientId', as: 'patient' });
+
+CareEpisode.hasOne(Review, { foreignKey: 'careEpisodeId', as: 'review' });
+Review.belongsTo(CareEpisode, { foreignKey: 'careEpisodeId', as: 'careEpisode' });
+
+// ── Cash Register Relationships ───────────────────────────────────
+Clinic.hasMany(CashRegisterShift, { foreignKey: 'clinicId', as: 'cashRegisterShifts' });
+CashRegisterShift.belongsTo(Clinic, { foreignKey: 'clinicId', as: 'clinic' });
+
+User.hasMany(CashRegisterShift, { foreignKey: 'userId', as: 'shifts' });
+CashRegisterShift.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
 module.exports = {
   sequelize,
   User,
   DoctorProfile,
+  Appointment,
   Consultation,
   Message,
   DoctorAvailability,
@@ -121,4 +174,10 @@ module.exports = {
   Prescription,
   PrescriptionItem,
   AuditLog,
+  InventoryBatch,
+  CashRegisterShift,
+  FamilyMember,
+  Document,
+  Review,
+  StockMovement
 };

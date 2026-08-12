@@ -1,6 +1,7 @@
 const consultationService = require('../services/consultation.service');
 const { sequelize, Consultation, CareEpisode, Prescription, PrescriptionItem, Product, Invoice, InvoiceItem } = require('../models');
 const catchAsync = require('../utils/catchAsync');
+const { sendNotification } = require('../services/notification.service');
 
 const createConsultation = catchAsync(async (req, res) => {
   const consultation = await consultationService.createConsultation(
@@ -8,8 +9,13 @@ const createConsultation = catchAsync(async (req, res) => {
     req.body.doctorId, 
     req.body.scheduledAt,
     req.body.paymentStatus,
-    req.body.fee
+    req.body.fee,
+    req.body.familyMemberId
   );
+  
+  // Notification: Booking Confirmed
+  await sendNotification(req.user.clinicId || null, req.user.id, 'BOOKING_CONFIRMED', { consultationId: consultation.id });
+
   res.status(201).json({ success: true, data: consultation });
 });
 
@@ -25,7 +31,40 @@ const getConsultation = catchAsync(async (req, res) => {
 
 const updateStatus = catchAsync(async (req, res) => {
   const consultation = await consultationService.updateStatus(req.params.id, req.body.status, req.user);
+  
+  if (req.body.status === 'ACTIVE') {
+    // Notification: Doctor Online / Starting Soon
+    await sendNotification(req.user.clinicId || null, consultation.patientId, 'DOCTOR_ONLINE', { consultationId: consultation.id });
+  }
+
   res.status(200).json({ success: true, data: consultation });
+});
+
+const escalateConsultation = catchAsync(async (req, res) => {
+  const consultationId = req.params.id;
+  const doctorId = req.user.id;
+  
+  try {
+    const result = await sequelize.transaction(async (t) => {
+      const consultation = await Consultation.findByPk(consultationId, { lock: t.LOCK.UPDATE, transaction: t });
+      if (!consultation || consultation.doctorId !== doctorId) throw new Error('UNAUTHORIZED');
+      
+      const episode = await CareEpisode.findOne({ where: { bookingId: consultation.id }, lock: t.LOCK.UPDATE, transaction: t });
+      if (episode) {
+        episode.status = 'IN_PERSON_URGENT';
+        await episode.save({ transaction: t });
+      }
+
+      consultation.status = 'CANCELLED'; // End the online session
+      await consultation.save({ transaction: t });
+      
+      return { consultation, episode };
+    });
+
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
 });
 
 const updateNotes = catchAsync(async (req, res) => {
@@ -78,6 +117,7 @@ const finalizeConsultation = catchAsync(async (req, res) => {
             consultationId: consultation.id,
             patientId: episode.patientId,
             doctorId,
+            familyMemberId: consultation.familyMemberId || null,
             status: 'DRAFT'
           }, { transaction: t });
           episode.prescriptionId = prescription.id;
@@ -139,12 +179,54 @@ const finalizeConsultation = catchAsync(async (req, res) => {
       
       await episode.save({ transaction: t });
 
-      return { consultation, episode };
+      return { consultation, episode, prescriptionCreated: !!prescription };
     });
+
+    if (result.prescriptionCreated) {
+      // Notification: Prescription Ready
+      await sendNotification(clinicId, result.episode.patientId, 'PRESCRIPTION_READY', { consultationId: consultationId });
+    }
 
     res.status(200).json({ success: true, data: result });
   } catch (err) {
     if (['CONSULTATION_NOT_FOUND', 'UNAUTHORIZED', 'ALREADY_FINALIZED', 'CARE_EPISODE_NOT_FOUND'].includes(err.message) || err.message.startsWith('PRODUCT_NOT_FOUND')) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+const payConsultation = catchAsync(async (req, res) => {
+  const consultationId = req.params.id;
+  const { paymentMethod } = req.body;
+
+  try {
+    const result = await sequelize.transaction(async (t) => {
+      const consultation = await Consultation.findByPk(consultationId, { lock: t.LOCK.UPDATE, transaction: t });
+      if (!consultation) throw new Error('CONSULTATION_NOT_FOUND');
+      if (consultation.patientId !== req.user.id) throw new Error('UNAUTHORIZED');
+
+      const episode = await CareEpisode.findOne({ where: { bookingId: consultation.id }, transaction: t });
+      if (!episode || !episode.invoiceId) throw new Error('NO_INVOICE_FOUND');
+
+      const invoice = await Invoice.findByPk(episode.invoiceId, { lock: t.LOCK.UPDATE, transaction: t });
+      if (!invoice) throw new Error('INVOICE_NOT_FOUND');
+      if (invoice.paymentStatus === 'PAID') throw new Error('ALREADY_PAID');
+
+      invoice.paymentMethod = paymentMethod || 'CARD';
+      invoice.paymentStatus = 'PAID';
+      invoice.patientPayableAmount = invoice.totalAmount;
+      await invoice.save({ transaction: t });
+
+      consultation.paymentStatus = 'PAID';
+      await consultation.save({ transaction: t });
+
+      return invoice;
+    });
+
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    if (['CONSULTATION_NOT_FOUND', 'UNAUTHORIZED', 'NO_INVOICE_FOUND', 'INVOICE_NOT_FOUND', 'ALREADY_PAID'].includes(err.message)) {
       return res.status(400).json({ success: false, message: err.message });
     }
     res.status(500).json({ success: false, message: err.message });
@@ -157,5 +239,7 @@ module.exports = {
   getConsultation, 
   updateStatus,
   updateNotes,
-  finalizeConsultation
+  finalizeConsultation,
+  payConsultation,
+  escalateConsultation
 };

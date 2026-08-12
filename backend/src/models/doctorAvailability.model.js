@@ -3,12 +3,12 @@ const sequelize = require('../config/database');
 
 const DoctorAvailability = sequelize.define('DoctorAvailability', {
   id: {
-    type: DataTypes.INTEGER,
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
     primaryKey: true,
-    autoIncrement: true,
   },
   doctorId: {
-    type: DataTypes.INTEGER,
+    type: DataTypes.UUID,
     allowNull: false,
   },
   dayOfWeek: {

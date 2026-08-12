@@ -21,6 +21,8 @@ router.get('/:id', consultationIdParamRule, validate, consultationController.get
 router.patch('/:id/status', restrictTo('DOCTOR'), updateStatusRules, validate, consultationController.updateStatus);
 router.patch('/:id/notes', restrictTo('DOCTOR'), consultationIdParamRule, validate, consultationController.updateNotes);
 router.post('/:id/finalize', restrictTo('DOCTOR'), consultationIdParamRule, validate, consultationController.finalizeConsultation);
+router.post('/:id/escalate', restrictTo('DOCTOR'), consultationIdParamRule, validate, consultationController.escalateConsultation);
+router.post('/:id/pay', restrictTo('PATIENT'), consultationIdParamRule, validate, consultationController.payConsultation);
 
 router.post('/:id/messages', sendMessageRules, validate, messageController.sendMessage);
 router.get('/:id/messages', consultationIdParamRule, validate, messageController.getMessages);

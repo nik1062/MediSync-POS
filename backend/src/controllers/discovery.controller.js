@@ -1,6 +1,26 @@
 const { Clinic, User, DoctorAvailability, Consultation } = require('../models');
 const { Op } = require('sequelize');
 const moment = require('moment');
+const env = require('../config/env'); // to get configurable radius if needed
+
+// Helper to calculate Haversine distance in km
+function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+  var R = 6371; // Radius of the earth in km
+  var dLat = deg2rad(lat2-lat1);  // deg2rad below
+  var dLon = deg2rad(lon2-lon1); 
+  var a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2)
+    ; 
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  var d = R * c; // Distance in km
+  return d;
+}
+
+function deg2rad(deg) {
+  return deg * (Math.PI/180);
+}
 
 const searchClinics = async (req, res) => {
   try {
@@ -34,8 +54,17 @@ const searchClinics = async (req, res) => {
       }]
     });
 
+    // Hard radius filtering (Haversine)
+    const clinicsWithinRadius = clinics.map(c => {
+      const distance = getDistanceFromLatLonInKm(lat, lng, c.latitude, c.longitude);
+      return { ...c.toJSON(), distance };
+    }).filter(c => c.distance <= radius);
+
+    // Sort by distance
+    clinicsWithinRadius.sort((a, b) => a.distance - b.distance);
+
     // Generate live available slots for each doctor found
-    const clinicsWithSlots = await Promise.all(clinics.map(async (clinic) => {
+    const clinicsWithSlots = await Promise.all(clinicsWithinRadius.map(async (clinic) => {
       const doctorsWithSlots = await Promise.all((clinic.doctors || []).map(async (doctor) => {
         const todayStr = moment().format('YYYY-MM-DD');
         const dayOfWeek = moment().day();
@@ -88,6 +117,7 @@ const searchClinics = async (req, res) => {
         address: clinic.address,
         latitude: clinic.latitude,
         longitude: clinic.longitude,
+        distance: clinic.distance,
         doctors: doctorsWithSlots
       };
     }));

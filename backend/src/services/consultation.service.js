@@ -3,7 +3,7 @@ const ApiError = require('../utils/ApiError');
 
 const VALID_STATUSES = ['PENDING', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
 
-async function createConsultation(patientId, doctorId, scheduledAt, paymentStatus, fee) {
+async function createConsultation(patientId, doctorId, scheduledAt, paymentStatus, fee, familyMemberId) {
   const doctor = await User.findOne({ where: { id: doctorId, role: 'DOCTOR' } });
   if (!doctor) {
     throw new ApiError(404, 'Doctor not found');
@@ -12,6 +12,7 @@ async function createConsultation(patientId, doctorId, scheduledAt, paymentStatu
   return Consultation.create({ 
     patientId, 
     doctorId, 
+    familyMemberId: familyMemberId || null,
     status: 'PENDING',
     scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
     paymentStatus: paymentStatus || 'UNPAID',
@@ -27,6 +28,7 @@ async function listConsultationsForUser(user) {
     include: [
       { model: User, as: 'patient', attributes: ['id', 'name', 'email'] },
       { model: User, as: 'doctor', attributes: ['id', 'name', 'email'] },
+      { model: require('../models').FamilyMember, as: 'familyMember' },
     ],
     order: [['createdAt', 'DESC']],
   });
@@ -37,6 +39,7 @@ async function getConsultationById(id, user) {
     include: [
       { model: User, as: 'patient', attributes: ['id', 'name', 'email'] },
       { model: User, as: 'doctor', attributes: ['id', 'name', 'email'] },
+      { model: require('../models').FamilyMember, as: 'familyMember' },
     ],
   });
 
@@ -45,6 +48,24 @@ async function getConsultationById(id, user) {
   }
 
   assertIsParticipant(consultation, user);
+
+  // If completed, fetch the CareEpisode for patient summary
+  if (consultation.status === 'COMPLETED' || consultation.paymentStatus === 'UNPAID') {
+    const { CareEpisode, Prescription, PrescriptionItem, Product, Invoice, InvoiceItem } = require('../models');
+    const episode = await CareEpisode.findOne({
+      where: { bookingId: consultation.id },
+      include: [
+        { model: Invoice, as: 'invoice', include: [{ model: InvoiceItem, as: 'items' }] },
+        { 
+          model: Prescription, 
+          as: 'prescriptionRecord', 
+          include: [{ model: PrescriptionItem, as: 'items', include: [{ model: Product, as: 'product' }] }] 
+        }
+      ]
+    });
+    // Attach it temporarily to the returned json (will not persist to db)
+    consultation.dataValues.careEpisode = episode;
+  }
 
   return consultation;
 }

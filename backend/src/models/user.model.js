@@ -5,9 +5,9 @@ const User = sequelize.define(
   'User',
   {
     id: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
-      autoIncrement: true,
     },
     name: {
       type: DataTypes.STRING,
@@ -31,6 +31,10 @@ const User = sequelize.define(
       type: DataTypes.UUID,
       allowNull: true,
       field: 'clinic_id',
+    },
+    isOnline: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
     },
   },
   {

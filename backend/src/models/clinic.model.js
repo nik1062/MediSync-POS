@@ -25,6 +25,21 @@ const Clinic = sequelize.define(
       type: DataTypes.DECIMAL(11, 8),
       allowNull: false,
     },
+    contactPhone: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: 'contact_phone'
+    },
+    operatingHours: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: 'operating_hours'
+    },
+    photoUrl: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: 'photo_url'
+    },
     subscriptionStatus: {
       type: DataTypes.ENUM('ACTIVE', 'EXPIRED'),
       allowNull: false,

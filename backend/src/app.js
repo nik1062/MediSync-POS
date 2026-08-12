@@ -26,8 +26,12 @@ app.use('/consultations', consultationRoutes);
 app.use('/availability', require('./routes/availability.routes'));
 app.use('/discovery', require('./routes/discovery.routes'));
 app.use('/appointments', require('./routes/appointment.routes'));
-app.use('/pos/invoices', require('./routes/pos.routes'));
+app.use('/api/pos', require('./routes/pos.routes'));
 app.use('/api/products', require('./routes/product.routes'));
+app.use('/api/family', require('./routes/family.routes'));
+app.use('/documents', require('./routes/document.routes'));
+app.use('/reviews', require('./routes/review.routes'));
+app.use('/prescriptions', require('./routes/prescription.routes'));
 
 app.use((req, res, next) => {
   next(new ApiError(404, `Route ${req.originalUrl} not found`));

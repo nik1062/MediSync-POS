@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { consultationAPI, productAPI } from '../api';
+import { POSCheckout } from './POSCheckout';
 import { io } from 'socket.io-client';
 import { 
   Video, 
@@ -21,6 +22,7 @@ import {
   Pill,
   Plus
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 const socket = io('http://localhost:5000', { autoConnect: false });
 
@@ -37,6 +39,7 @@ const PRESCRIPTION_SUGGESTIONS = [
 export function ConsultationRoom({ user }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -44,6 +47,7 @@ export function ConsultationRoom({ user }) {
   const [savingNotes, setSavingNotes] = useState(false);
   const [consultation, setConsultation] = useState(null);
   const messagesEndRef = useRef(null);
+  const [showCheckout, setShowCheckout] = useState(false);
 
   // Live Vitals Simulation
   const [vitals, setVitals] = useState({
@@ -235,6 +239,27 @@ export function ConsultationRoom({ user }) {
     setSuggestedDrugs([]);
   };
 
+  const autoStructureSOAP = async () => {
+    setSavingNotes(true);
+    try {
+      // Mock AI parsing from chat history
+      const patientMessages = messages.filter(m => m.senderId !== user.id).map(m => m.message).join('. ');
+      
+      // Artificial delay to simulate AI processing
+      await new Promise(r => setTimeout(r, 1500));
+      
+      setNotes(prev => ({
+        ...prev,
+        subjective: prev.subjective || (patientMessages ? `Patient reports: ${patientMessages.slice(0, 100)}...` : 'Patient reports symptoms...'),
+        objective: prev.objective || `Vitals stable. HR: ${vitals.bpm} BPM, SpO2: ${vitals.spO2}%, Temp: ${vitals.temp}°F.`,
+        assessment: prev.assessment || 'Preliminary assessment based on telemetry and reported symptoms.',
+        plan: prev.plan || 'Advised rest, monitoring, and symptomatic medication.'
+      }));
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
   // Smart Speech to Text Clinical Dictation using HTML5 Web Speech API
   const startSpeechDictation = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -334,6 +359,22 @@ export function ConsultationRoom({ user }) {
       alert(err.response?.data?.message || 'Failed to save notes');
     }
     setSavingNotes(false);
+  };
+
+  const handleEscalate = async () => {
+    if (!window.confirm("Are you sure you want to escalate this consultation to In-Person Urgent? This will end the call and notify the patient immediately.")) return;
+    try {
+      await consultationAPI.escalate(id);
+      socket.emit('send_message', {
+        consultationId: id,
+        message: '[SYSTEM_ESCALATION]',
+        senderId: user.id
+      });
+      setCallStatus(null);
+      fetchMessages();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to escalate consultation.');
+    }
   };
 
   const sendPrescription = async () => {
@@ -477,10 +518,10 @@ export function ConsultationRoom({ user }) {
               {videoActive ? (
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ width: '72px', height: '72px', borderRadius: '50%', background: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', margin: '0 auto 12px' }}>
-                    {(user.role === 'PATIENT' ? consultation?.doctor?.name : consultation?.patient?.name)?.charAt(0)}
+                    {(user.role === 'PATIENT' ? consultation?.doctor?.name : (consultation?.familyMember?.name || consultation?.patient?.name))?.charAt(0)}
                   </div>
                   <p style={{ margin: 0, fontWeight: 600, fontSize: '14px' }}>
-                    {user.role === 'PATIENT' ? consultation?.doctor?.name : consultation?.patient?.name}
+                    {user.role === 'PATIENT' ? consultation?.doctor?.name : (consultation?.familyMember ? `${consultation?.familyMember?.name} (Dependent)` : consultation?.patient?.name)}
                   </p>
                   <span style={{ fontSize: '11px', color: '#94a3b8' }}>Camera Feed Active</span>
                 </div>
@@ -539,6 +580,15 @@ export function ConsultationRoom({ user }) {
             >
               <Monitor size={18} />
             </button>
+            {user.role === 'DOCTOR' && (
+              <button 
+                onClick={handleEscalate}
+                style={{ background: '#b91c1c', border: '1px solid #f87171', color: 'white', padding: '0 24px', borderRadius: '24px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+              >
+                <AlertTriangle size={16} />
+                Escalate (Urgent)
+              </button>
+            )}
             <button 
               onClick={() => setCallStatus(null)} 
               style={{ background: '#ef4444', border: 'none', color: 'white', padding: '0 24px', borderRadius: '24px', fontWeight: 600, cursor: 'pointer' }}
@@ -550,7 +600,7 @@ export function ConsultationRoom({ user }) {
       )}
 
       {/* Main Grid: 3 Column Dashboard Layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: user.role === 'DOCTOR' ? '1fr 280px 340px' : '1fr 280px', gap: '24px', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: (user.role === 'DOCTOR' || (user.role === 'PATIENT' && (consultation?.status === 'COMPLETED' || consultation?.paymentStatus === 'UNPAID'))) ? '1fr 280px 340px' : '1fr 280px', gap: '24px', alignItems: 'start' }}>
         
         {/* Column 1: Secured Live Chat */}
         <div className="chat-container" style={{ display: 'flex', flexDirection: 'column', height: '620px', background: 'var(--color-white)', border: '1px solid var(--color-border)', borderRadius: '16px', overflow: 'hidden' }}>
@@ -586,14 +636,18 @@ export function ConsultationRoom({ user }) {
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--color-border-light)', paddingBottom: '10px', marginBottom: '12px' }}>
                             <span style={{ fontSize: '18px' }}>⚕️</span>
-                            <strong style={{ fontSize: '14px', color: 'var(--color-primary)' }}>Prescription Receipt</strong>
+                            <strong style={{ fontSize: '14px', color: 'var(--color-primary)' }}>{t('prescription.receipt')}</strong>
+                          </div>
+                          <div style={{ padding: '8px', background: '#f8fafc', borderRadius: '8px', marginBottom: '12px', fontSize: '11px', color: '#64748b', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                            <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '2px', color: '#f59e0b' }} />
+                            <span>{t('prescription.clinical_warning')}</span>
                           </div>
                           <div style={{ marginBottom: '10px' }}>
-                            <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Diagnosis</span>
+                            <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>{t('prescription.diagnosis')}</span>
                             <p style={{ margin: '2px 0 0 0', fontWeight: 600 }}>{msg.message.split('||')[0].replace('[PRESCRIPTION] DIAGNOSIS:', '').trim()}</p>
                           </div>
                           <div style={{ marginBottom: '12px' }}>
-                            <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>Treatment Course</span>
+                            <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', textTransform: 'uppercase', display: 'block', fontWeight: 600 }}>{t('prescription.treatment')}</span>
                             <p style={{ margin: '2px 0 0 0', fontWeight: 600, color: '#111' }}>{msg.message.split('||')[1]?.replace('TREATMENT:', '').trim()}</p>
                           </div>
                           
@@ -606,8 +660,32 @@ export function ConsultationRoom({ user }) {
                             )}
                           >
                             <FileDown size={14} />
-                            <span>Download PDF</span>
+                            <span>{t('prescription.download_pdf')}</span>
                           </button>
+                        </div>
+                      ) : msg.message === '[SYSTEM_ESCALATION]' ? (
+                        <div style={{ background: '#fee2e2', color: '#b91c1c', padding: '16px', borderRadius: '12px', border: '1px solid #fecaca', textAlign: 'center' }}>
+                          <AlertTriangle size={32} style={{ margin: '0 auto 12px' }} />
+                          <h4 style={{ fontSize: '16px', fontWeight: 800, marginBottom: '8px' }}>MEDICAL EMERGENCY INSTRUCTION</h4>
+                          <p style={{ fontSize: '13px', marginBottom: '16px', fontWeight: 500 }}>
+                            The doctor has escalated this consultation to <strong>In-Person Urgent</strong>. Please disconnect and proceed to the nearest emergency room immediately.
+                          </p>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <button 
+                              className="btn btn-primary" 
+                              style={{ background: '#b91c1c', borderColor: '#b91c1c', fontSize: '14px', width: '100%' }}
+                              onClick={() => window.open(`tel:112`, '_self')}
+                            >
+                              Call 112
+                            </button>
+                            <button 
+                              className="btn btn-secondary" 
+                              style={{ fontSize: '14px', width: '100%' }}
+                              onClick={() => window.open(`https://www.google.com/maps/search/nearest+emergency+room+hospital`, '_blank')}
+                            >
+                              View Nearest ER
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         msg.message
@@ -704,7 +782,7 @@ export function ConsultationRoom({ user }) {
             <h4 style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-secondary)', marginBottom: '12px', marginTop: 0 }}>Consultation Details</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
               <div><strong>Practitioner:</strong> {consultation?.doctor?.name}</div>
-              <div><strong>Patient Name:</strong> {consultation?.patient?.name}</div>
+              <div><strong>Patient Name:</strong> {consultation?.familyMember ? `${consultation?.familyMember?.name} (Dependent of ${consultation?.patient?.name})` : consultation?.patient?.name}</div>
               <div><strong>Status:</strong> <span className={`badge badge-${consultation?.status?.toLowerCase()}`}>{consultation?.status}</span></div>
               <div><strong>Scheduled:</strong> {consultation?.scheduledAt ? new Date(consultation.scheduledAt).toLocaleString() : 'Immediate'}</div>
               <div>
@@ -749,6 +827,28 @@ export function ConsultationRoom({ user }) {
               >
                 <Sparkles size={12} />
                 <span>{dictating ? 'Listening...' : 'Dictate'}</span>
+              </button>
+              {/* Auto-Structure Button */}
+              <button 
+                type="button" 
+                onClick={autoStructureSOAP}
+                disabled={savingNotes}
+                style={{
+                  border: 'none',
+                  background: 'rgba(59, 130, 246, 0.1)',
+                  color: '#3b82f6',
+                  padding: '4px 10px',
+                  borderRadius: '100px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  cursor: savingNotes ? 'not-allowed' : 'pointer'
+                }}
+              >
+                <Activity size={12} />
+                <span>{savingNotes ? 'AI structuring...' : 'AI Auto-Structure'}</span>
               </button>
             </div>
             
@@ -926,7 +1026,86 @@ export function ConsultationRoom({ user }) {
             </div>
           </div>
         )}
+
+        {/* Column 3: Patient Post-Visit Summary (Patients Only) */}
+        {user.role === 'PATIENT' && (consultation?.status === 'COMPLETED' || consultation?.paymentStatus === 'UNPAID') && (
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', height: '620px', padding: '24px', background: 'var(--color-white)', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid var(--color-border)', paddingBottom: '12px', marginBottom: '16px' }}>
+              <FileText size={18} style={{ color: 'var(--color-primary)' }} />
+              <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>Post-Visit Summary</h3>
+            </div>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', color: 'var(--color-text-secondary)' }}>Clinical Notes</h4>
+              <div style={{ background: 'var(--color-bg)', padding: '12px', borderRadius: '8px', fontSize: '12px', border: '1px solid var(--color-border-light)' }}>
+                {consultation?.notes ? (
+                  <>
+                    <p style={{ margin: '0 0 8px 0' }}><strong>Assessment:</strong> {JSON.parse(consultation.notes).assessment}</p>
+                    <p style={{ margin: 0 }}><strong>Plan:</strong> {JSON.parse(consultation.notes).plan}</p>
+                  </>
+                ) : 'No clinical notes recorded.'}
+              </div>
+            </div>
+
+            {consultation?.careEpisode?.prescriptionRecord && (
+              <div style={{ marginBottom: '16px' }}>
+                <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', color: 'var(--color-text-secondary)' }}>Prescribed Medications</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {consultation.careEpisode.prescriptionRecord.items?.map(item => (
+                    <div key={item.id} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', background: 'var(--color-white)', fontSize: '12px' }}>
+                      <strong style={{ display: 'block', marginBottom: '4px' }}>{item.product?.name}</strong>
+                      <span style={{ color: 'var(--color-text-secondary)' }}>Take {item.dosage}, {item.frequency} for {item.durationDays} days.</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginTop: 'auto', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+              <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', color: 'var(--color-text-secondary)' }}>Invoice & Payment</h4>
+              <div style={{ padding: '12px', borderRadius: '8px', background: consultation?.paymentStatus === 'PAID' ? 'var(--color-success-bg)' : 'var(--color-warning-bg)', border: `1px solid ${consultation?.paymentStatus === 'PAID' ? 'var(--color-success-light)' : 'var(--color-warning-light)'}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '12px' }}>
+                  <strong>Status:</strong>
+                  <span style={{ color: consultation?.paymentStatus === 'PAID' ? 'var(--color-success)' : 'var(--color-warning)', fontWeight: 'bold' }}>{consultation?.paymentStatus}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                  <strong>Total Amount:</strong>
+                  <span>${consultation?.careEpisode?.invoice?.totalAmount || '15.75'}</span>
+                </div>
+                {consultation?.paymentStatus === 'UNPAID' && (
+                  <button 
+                    className="btn btn-primary" 
+                    style={{ width: '100%', marginTop: '12px', padding: '8px', fontSize: '12px' }}
+                    onClick={() => setShowCheckout(true)}
+                  >
+                    Pay Invoice Now
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
+      
+      {showCheckout && (
+        <POSCheckout 
+          isOpen={showCheckout}
+          onClose={() => setShowCheckout(false)}
+          invoiceId={consultation?.careEpisode?.invoice?.id}
+          consultationId={consultation?.id}
+          cart={[]} // Read-only for patient checkout
+          discount={0}
+          tax={consultation?.careEpisode?.invoice?.taxApplied || 0.75}
+          totalAmount={parseFloat(consultation?.careEpisode?.invoice?.totalAmount || 15.75)}
+          patientName={user.name}
+          isPatientView={true}
+          onPaymentSuccess={() => {
+            fetchMessages(); // Refresh consultation data
+            setShowCheckout(false);
+          }}
+        />
+      )}
     </div>
   );
 }

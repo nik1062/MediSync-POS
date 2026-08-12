@@ -10,7 +10,7 @@ const Invoice = sequelize.define(
       primaryKey: true,
     },
     consultationId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: true, // Allow direct POS walk-in without a consultation
       field: 'consultation_id',
     },
@@ -42,6 +42,18 @@ const Invoice = sequelize.define(
       allowNull: false,
       defaultValue: 0.00,
       field: 'tax_applied',
+    },
+    insuranceClaimAmount: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.00,
+      field: 'insurance_claim_amount',
+    },
+    patientPayableAmount: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.00,
+      field: 'patient_payable_amount',
     },
   },
   {
