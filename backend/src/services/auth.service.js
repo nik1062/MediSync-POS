@@ -22,7 +22,7 @@ async function register(args) {
     
     // B2B SaaS Onboarding: Create a new Clinic Tenant if provided
     if (args.clinicName) {
-      const { Clinic } = require('../models');
+      const { Clinic, License } = require('../models');
       const clinic = await Clinic.create({
         name: args.clinicName,
         address: args.clinicAddress || 'Pending Address',
@@ -34,6 +34,19 @@ async function register(args) {
       clinicId = clinic.id;
       user.clinicId = clinicId;
       await user.save();
+      
+      // Also create the required License for the clinic
+      let planType = 'PRO';
+      if (args.plan && ['FREE', 'STARTER', 'PRO', 'ENTERPRISE'].includes(args.plan.toUpperCase())) {
+        planType = args.plan.toUpperCase();
+      }
+      await License.create({
+        clinicId: clinicId,
+        plan: planType,
+        status: 'ACTIVE',
+        trialEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        renewalDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      });
     }
 
     await DoctorProfile.create({
