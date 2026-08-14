@@ -1,52 +1,59 @@
-const { User, DoctorProfile, Tenant, License, Visit, Bill, Patient, FeatureFlag } = require('../models');
+const { User, DoctorProfile, Clinic, License, Appointment, Invoice, FeatureFlag } = require('../models');
 const { Op } = require('sequelize');
 const ApiError = require('../utils/ApiError');
 
 /**
  * Get clinic dashboard data.
  */
-async function getClinicDashboard(tenantId) {
+async function getClinicDashboard(clinicId) {
   const today = new Date().toISOString().split('T')[0];
-
-  // Today's stats
-  const todayVisits = await Visit.count({ where: { tenantId, visitDate: today } });
-  const todayCompleted = await Visit.count({ where: { tenantId, visitDate: today, status: 'COMPLETED' } });
-  const todayWaiting = await Visit.count({ where: { tenantId, visitDate: today, status: 'WAITING' } });
-  const todayInConsultation = await Visit.count({ where: { tenantId, visitDate: today, status: 'IN_CONSULTATION' } });
-
-  // Today's revenue
   const startOfDay = new Date(today);
   const endOfDay = new Date(today);
   endOfDay.setHours(23, 59, 59, 999);
 
-  const todayRevenue = await Bill.sum('total', {
+  // Today's stats
+  const todayAppointments = await Appointment.count({ 
+    where: { clinicId, scheduledAt: { [Op.between]: [startOfDay, endOfDay] } } 
+  });
+  const todayCompleted = await Appointment.count({ 
+    where: { clinicId, scheduledAt: { [Op.between]: [startOfDay, endOfDay] }, status: 'COMPLETED' } 
+  });
+  const todayWaiting = await Appointment.count({ 
+    where: { clinicId, scheduledAt: { [Op.between]: [startOfDay, endOfDay] }, status: 'WAITING' } 
+  });
+  const todayInConsultation = await Appointment.count({ 
+    where: { clinicId, scheduledAt: { [Op.between]: [startOfDay, endOfDay] }, status: 'IN_CONSULTATION' } 
+  });
+
+  // Today's revenue
+  const todayRevenue = await Invoice.sum('total', {
     where: {
-      tenantId,
+      clinicId,
       createdAt: { [Op.between]: [startOfDay, endOfDay] },
-      paymentStatus: { [Op.in]: ['PAID', 'PARTIAL'] },
+      status: { [Op.in]: ['PAID', 'PARTIAL'] },
     },
   }) || 0;
 
   // Total patients
-  const totalPatients = await Patient.count({ where: { tenantId } });
+  const totalPatients = await User.count({ where: { clinicId, role: 'PATIENT' } });
 
   // Staff on duty
-  const staffOnDuty = await User.count({ where: { tenantId, isActive: true } });
+  const staffOnDuty = await User.count({ where: { clinicId, isActive: true, role: { [Op.ne]: 'PATIENT' } } });
 
-  // Recent visits
-  const recentVisits = await Visit.findAll({
-    where: { tenantId, visitDate: today },
+  // Recent visits (Appointments)
+  const recentVisits = await Appointment.findAll({
+    where: { clinicId, scheduledAt: { [Op.between]: [startOfDay, endOfDay] } },
     include: [
-      { model: Patient, as: 'patient', attributes: ['id', 'name', 'phone'] },
+      { model: User, as: 'patient', attributes: ['id', 'name', 'phone'] },
       { model: User, as: 'doctor', attributes: ['id', 'name'] },
     ],
-    order: [['tokenNo', 'DESC']],
+    order: [['scheduledAt', 'DESC']],
     limit: 10,
   });
 
   return {
     today: {
-      visits: todayVisits,
+      visits: todayAppointments,
       completed: todayCompleted,
       waiting: todayWaiting,
       inConsultation: todayInConsultation,
@@ -61,9 +68,9 @@ async function getClinicDashboard(tenantId) {
 /**
  * Get staff list for a clinic.
  */
-async function getStaffList(tenantId) {
+async function getStaffList(clinicId) {
   return User.findAll({
-    where: { tenantId },
+    where: { clinicId, role: { [Op.ne]: 'PATIENT' } },
     attributes: ['id', 'name', 'email', 'role', 'isActive', 'createdAt'],
     include: [{ model: DoctorProfile, as: 'doctorProfile' }],
     order: [['role', 'ASC'], ['name', 'ASC']],
@@ -73,8 +80,8 @@ async function getStaffList(tenantId) {
 /**
  * Update a staff member.
  */
-async function updateStaff(tenantId, staffId, data) {
-  const user = await User.findOne({ where: { id: staffId, tenantId } });
+async function updateStaff(clinicId, staffId, data) {
+  const user = await User.findOne({ where: { id: staffId, clinicId } });
   if (!user) throw new ApiError(404, 'Staff member not found');
 
   if (user.role === 'CLINIC_ADMIN' && data.role && data.role !== 'CLINIC_ADMIN') {
@@ -91,24 +98,24 @@ async function updateStaff(tenantId, staffId, data) {
 /**
  * Get subscription info for a clinic.
  */
-async function getSubscription(tenantId) {
-  const tenant = await Tenant.findByPk(tenantId, {
+async function getSubscription(clinicId) {
+  const clinic = await Clinic.findByPk(clinicId, {
     include: [{ model: License, as: 'license' }],
   });
-  if (!tenant) throw new ApiError(404, 'Clinic not found');
+  if (!clinic) throw new ApiError(404, 'Clinic not found');
 
   // Get feature flags for current plan
   let features = [];
-  if (tenant.license?.plan) {
+  if (clinic.license?.plan) {
     const flags = await FeatureFlag.findAll({
-      where: { plan: tenant.license.plan, enabled: true },
+      where: { plan: clinic.license.plan, enabled: true },
     });
     features = flags.map(f => f.featureKey);
   }
 
   return {
-    tenant: { id: tenant.id, name: tenant.name },
-    license: tenant.license,
+    clinic: { id: clinic.id, name: clinic.name },
+    license: clinic.license,
     features,
   };
 }
@@ -116,8 +123,8 @@ async function getSubscription(tenantId) {
 /**
  * Get revenue report for a clinic.
  */
-async function getRevenueReport(tenantId, { startDate, endDate, groupBy = 'day' }) {
-  const where = { tenantId, paymentStatus: { [Op.in]: ['PAID', 'PARTIAL'] } };
+async function getRevenueReport(clinicId, { startDate, endDate, groupBy = 'day' }) {
+  const where = { clinicId, status: { [Op.in]: ['PAID', 'PARTIAL'] } };
 
   if (startDate) {
     where.createdAt = where.createdAt || {};
@@ -130,7 +137,7 @@ async function getRevenueReport(tenantId, { startDate, endDate, groupBy = 'day' 
     where.createdAt[Op.lte] = end;
   }
 
-  const bills = await Bill.findAll({
+  const invoices = await Invoice.findAll({
     where,
     order: [['createdAt', 'ASC']],
   });
@@ -138,34 +145,37 @@ async function getRevenueReport(tenantId, { startDate, endDate, groupBy = 'day' 
   // Aggregate by day
   const dailyRevenue = {};
   let totalRevenue = 0;
-  let totalBills = 0;
+  let totalInvoices = 0;
 
-  for (const bill of bills) {
-    const day = bill.createdAt.toISOString().split('T')[0];
+  for (const invoice of invoices) {
+    const day = invoice.createdAt.toISOString().split('T')[0];
     if (!dailyRevenue[day]) {
       dailyRevenue[day] = { date: day, revenue: 0, bills: 0, cash: 0, upi: 0, card: 0 };
     }
-    const amount = parseFloat(bill.total) || 0;
+    const amount = parseFloat(invoice.total) || 0;
     dailyRevenue[day].revenue += amount;
     dailyRevenue[day].bills += 1;
-    dailyRevenue[day][bill.paymentMode.toLowerCase()] = (dailyRevenue[day][bill.paymentMode.toLowerCase()] || 0) + amount;
+    if (invoice.paymentMethod) {
+      const pm = invoice.paymentMethod.toLowerCase();
+      dailyRevenue[day][pm] = (dailyRevenue[day][pm] || 0) + amount;
+    }
     totalRevenue += amount;
-    totalBills += 1;
+    totalInvoices += 1;
   }
 
   return {
     daily: Object.values(dailyRevenue),
     totalRevenue,
-    totalBills,
+    totalBills: totalInvoices,
   };
 }
 
 /**
  * Get list of doctors in a clinic.
  */
-async function getDoctors(tenantId) {
+async function getDoctors(clinicId) {
   return User.findAll({
-    where: { tenantId, role: 'DOCTOR', isActive: true },
+    where: { clinicId, role: 'DOCTOR', isActive: true },
     attributes: ['id', 'name', 'email'],
     include: [{ model: DoctorProfile, as: 'doctorProfile' }],
   });

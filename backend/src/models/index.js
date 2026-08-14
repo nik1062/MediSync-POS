@@ -15,10 +15,16 @@ const PrescriptionItem = require('./prescriptionItem.model');
 const AuditLog = require('./auditLog.model');
 const InventoryBatch = require('./inventoryBatch.model');
 const CashRegisterShift = require('./cashRegisterShift.model');
+const License = require('./license.model');
+const FeatureFlag = require('./featureFlag.model');
 const FamilyMember = require('./familyMember.model')(sequelize);
 const Document = require('./document.model')(sequelize);
 const Review = require('./review.model')(sequelize);
 const StockMovement = require('./stockMovement.model');
+
+// ── License Relationships ──────────────────────────────────────────
+Clinic.hasOne(License, { foreignKey: 'clinicId', as: 'license' });
+License.belongsTo(Clinic, { foreignKey: 'clinicId', as: 'clinic' });
 
 // ── Clinic Relationships ──────────────────────────────────────────
 Clinic.hasMany(Product, { foreignKey: 'clinicId', as: 'products' });
@@ -179,5 +185,7 @@ module.exports = {
   FamilyMember,
   Document,
   Review,
-  StockMovement
+  StockMovement,
+  License,
+  FeatureFlag
 };

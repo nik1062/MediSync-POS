@@ -11,7 +11,7 @@ const Appointment = sequelize.define(
     },
     clinicId: {
       type: DataTypes.UUID,
-      allowNull: true,
+      allowNull: false,
       field: 'clinic_id',
     },
     patientId: {
@@ -45,6 +45,12 @@ const Appointment = sequelize.define(
     fee: {
       type: DataTypes.DECIMAL,
       allowNull: true,
+    },
+    paymentStatus: {
+      type: DataTypes.ENUM('PAID_ONLINE', 'PENDING_ON_SITE', 'SETTLED'),
+      allowNull: false,
+      defaultValue: 'PENDING_ON_SITE',
+      field: 'payment_status',
     },
   },
   {

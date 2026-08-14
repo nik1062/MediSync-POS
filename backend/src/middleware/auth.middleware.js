@@ -21,6 +21,12 @@ const authenticate = async (req, res, next) => {
       throw new ApiError(401, 'User no longer exists');
     }
 
+    // Attach clinic scope data. The token payload should contain the list of authorized clinics.
+    user.authorizedClinicIds = decoded.authorizedClinicIds || [];
+    
+    // The current clinic can be passed via a custom header or fallback to what's in the token
+    user.currentClinicId = req.headers['x-current-clinic-id'] || decoded.currentClinicId || null;
+
     req.user = user;
     next();
   } catch (err) {

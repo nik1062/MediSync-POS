@@ -83,4 +83,23 @@ export const prescriptionsAPI = {
   getMyPrescriptions: () => api.get('/prescriptions/my'),
 };
 
+export const clinicAdminAPI = {
+  getDashboard: () => api.get('/api/clinic-admin/dashboard'),
+  getStaff: () => api.get('/api/clinic-admin/staff'),
+  updateStaff: (id, data) => api.put(`/api/clinic-admin/staff/${id}`, data),
+  getSubscription: () => api.get('/api/clinic-admin/subscription'),
+  getRevenueReport: (params) => api.get('/api/clinic-admin/revenue', { params }),
+  getDoctors: () => api.get('/api/clinic-admin/doctors'),
+};
+
+export const superAdminAPI = {
+  getStats: () => api.get('/api/super-admin/stats'),
+  listTenants: (params) => api.get('/api/super-admin/tenants', { params }),
+  getTenantDetail: (id) => api.get(`/api/super-admin/tenants/${id}`),
+  updateTenantLicense: (id, data) => api.put(`/api/super-admin/tenants/${id}/license`, data),
+  getFeatures: () => api.get('/api/super-admin/features'),
+  upsertFeature: (data) => api.post('/api/super-admin/features', data),
+  updateFeature: (id, data) => api.put(`/api/super-admin/features/${id}`, data),
+};
+
 export default api;

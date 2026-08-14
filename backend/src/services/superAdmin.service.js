@@ -1,11 +1,11 @@
-const { Tenant, License, User, DoctorProfile, FeatureFlag, Bill, Visit, Patient } = require('../models');
+const { Clinic, License, User, DoctorProfile, FeatureFlag, Invoice, Appointment } = require('../models');
 const { Op } = require('sequelize');
 const sequelize = require('../config/database');
 const ApiError = require('../utils/ApiError');
 const auditService = require('./audit.service');
 
 /**
- * List all tenants with license info (Super Admin).
+ * List all clinics with license info (Super Admin).
  */
 async function listTenants({ page = 1, limit = 20, plan, status }) {
   const where = {};
@@ -15,7 +15,7 @@ async function listTenants({ page = 1, limit = 20, plan, status }) {
   if (status) licenseWhere.status = status;
 
   const offset = (page - 1) * limit;
-  const { rows, count } = await Tenant.findAndCountAll({
+  const { rows, count } = await Clinic.findAndCountAll({
     where,
     include: [{
       model: License,
@@ -36,42 +36,42 @@ async function listTenants({ page = 1, limit = 20, plan, status }) {
 }
 
 /**
- * Get a single tenant's detail (Super Admin).
+ * Get a single clinic's detail (Super Admin).
  */
-async function getTenantDetail(tenantId) {
-  const tenant = await Tenant.findByPk(tenantId, {
+async function getTenantDetail(clinicId) {
+  const clinic = await Clinic.findByPk(clinicId, {
     include: [{ model: License, as: 'license' }],
   });
-  if (!tenant) throw new ApiError(404, 'Tenant not found');
+  if (!clinic) throw new ApiError(404, 'Clinic not found');
 
   // Get staff count
-  const staffCount = await User.count({ where: { tenantId } });
+  const staffCount = await User.count({ where: { clinicId, role: { [Op.ne]: 'PATIENT' } } });
 
   // Get patient count
-  const patientCount = await Patient.count({ where: { tenantId } });
+  const patientCount = await User.count({ where: { clinicId, role: 'PATIENT' } });
 
-  // Get total revenue (sum of all bills)
-  const totalRevenue = await Bill.sum('total', { where: { tenantId } }) || 0;
+  // Get total revenue
+  const totalRevenue = await Invoice.sum('total', { where: { clinicId } }) || 0;
 
   // Get staff list
   const staff = await User.findAll({
-    where: { tenantId },
+    where: { clinicId, role: { [Op.ne]: 'PATIENT' } },
     attributes: ['id', 'name', 'email', 'role', 'isActive', 'createdAt'],
   });
 
   return {
-    tenant,
+    tenant: clinic,
     stats: { staffCount, patientCount, totalRevenue },
     staff,
   };
 }
 
 /**
- * Update a tenant's license (plan, status).
+ * Update a clinic's license (plan, status).
  */
-async function updateTenantLicense(tenantId, data, adminUserId) {
-  const license = await License.findOne({ where: { tenantId } });
-  if (!license) throw new ApiError(404, 'License not found for this tenant');
+async function updateTenantLicense(clinicId, data, adminUserId) {
+  const license = await License.findOne({ where: { clinicId } });
+  if (!license) throw new ApiError(404, 'License not found for this clinic');
 
   const oldPlan = license.plan;
   const oldStatus = license.status;
@@ -84,7 +84,7 @@ async function updateTenantLicense(tenantId, data, adminUserId) {
   await license.save();
 
   await auditService.log({
-    tenantId,
+    clinicId,
     userId: adminUserId,
     action: 'UPDATE',
     entityType: 'license',
@@ -99,7 +99,7 @@ async function updateTenantLicense(tenantId, data, adminUserId) {
  * Platform-wide revenue and stats (Super Admin).
  */
 async function getPlatformStats() {
-  const totalTenants = await Tenant.count();
+  const totalTenants = await Clinic.count();
   const activeTenants = await License.count({ where: { status: 'ACTIVE' } });
   const trialTenants = await License.count({ where: { status: 'TRIAL' } });
   const expiredTenants = await License.count({ where: { status: 'EXPIRED' } });

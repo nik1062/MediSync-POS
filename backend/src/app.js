@@ -29,15 +29,21 @@ app.use('/appointments', require('./routes/appointment.routes'));
 app.use('/api/pos', require('./routes/pos.routes'));
 app.use('/api/products', require('./routes/product.routes'));
 app.use('/api/family', require('./routes/family.routes'));
+app.use('/api/webhooks', require('./routes/webhook.routes'));
 app.use('/documents', require('./routes/document.routes'));
 app.use('/reviews', require('./routes/review.routes'));
 app.use('/prescriptions', require('./routes/prescription.routes'));
-
+app.use('/api/clinic-admin', require('./routes/clinicAdmin.routes'));
+app.use('/api/super-admin', require('./routes/superAdmin.routes'));
+app.use('/api/invoices', require('./routes/invoice.routes'));
 app.use((req, res, next) => {
   next(new ApiError(404, `Route ${req.originalUrl} not found`));
 });
 
 app.use(errorHandler);
+
+const http = require('http');
+const socket = require('./socket');
 
 async function start() {
   try {
@@ -47,7 +53,11 @@ async function start() {
     await sequelize.sync();
     console.log('Models synced');
 
-    app.listen(env.port, () => {
+    // Wrap express app with an HTTP server for socket.io
+    const server = http.createServer(app);
+    socket.init(server);
+
+    server.listen(env.port, () => {
       console.log(`Server running on port ${env.port}`);
     });
   } catch (err) {

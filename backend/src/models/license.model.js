@@ -3,14 +3,15 @@ const sequelize = require('../config/database');
 
 const License = sequelize.define('License', {
   id: {
-    type: DataTypes.INTEGER,
+    type: DataTypes.UUID,
     primaryKey: true,
-    autoIncrement: true,
+    defaultValue: DataTypes.UUIDV4,
   },
-  tenantId: {
-    type: DataTypes.INTEGER,
+  clinicId: {
+    type: DataTypes.UUID,
     allowNull: false,
     unique: true,
+    field: 'clinic_id',
   },
   plan: {
     type: DataTypes.STRING(20),

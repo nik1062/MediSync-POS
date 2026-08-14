@@ -56,4 +56,38 @@ const bookAppointment = catchAsync(async (req, res) => {
   }
 });
 
-module.exports = { bookAppointment };
+const getAppointments = catchAsync(async (req, res) => {
+  // Enforce clinic scope
+  const clinicId = req.user.currentClinicId;
+  const where = {};
+  if (clinicId) {
+    where.clinicId = clinicId;
+  } else if (req.user.role === 'PATIENT') {
+    where.patientId = req.user.id;
+  }
+
+  const appointments = await Appointment.findAll({ where });
+  res.status(200).json(appointments);
+});
+
+const updateAppointment = catchAsync(async (req, res) => {
+  const { id } = req.params;
+  const { paymentStatus, ...rest } = req.body;
+  
+  if (paymentStatus === 'PAID_ONLINE') {
+    return res.status(403).json({ success: false, message: 'Cannot set PAID_ONLINE directly' });
+  }
+
+  const appointment = await Appointment.findByPk(id);
+  if (!appointment) return res.status(404).json({ success: false, message: 'Not found' });
+
+  // Optional: check clinic scope
+  if (req.user.currentClinicId && appointment.clinicId !== req.user.currentClinicId) {
+    return res.status(403).json({ success: false, message: 'Forbidden' });
+  }
+
+  await appointment.update(rest);
+  res.status(200).json({ success: true, data: appointment });
+});
+
+module.exports = { bookAppointment, getAppointments, updateAppointment };

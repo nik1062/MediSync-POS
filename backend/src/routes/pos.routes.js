@@ -2,7 +2,13 @@ const express = require('express');
 const router = express.Router();
 const posController = require('../controllers/pos.controller');
 const authenticate = require('../middleware/auth.middleware');
+const requireFeature = require('../middleware/featureGate.middleware');
 const { Clinic } = require('../models');
+
+// Add test route
+router.get('/pharmacy-gated', authenticate, requireFeature('pharmacy_module', 'PRO'), (req, res) => {
+  res.status(200).json({ success: true, message: 'Pharmacy module accessed' });
+});
 
 // Middleware to verify active clinic subscription
 const checkClinicSubscription = async (req, res, next) => {
@@ -40,6 +46,9 @@ const checkClinicSubscription = async (req, res, next) => {
 router.use(authenticate);
 
 router.post('/renew', posController.renewSubscription);
+
+// Feature Gate: Check if the clinic's plan includes the billing module
+router.use(requireFeature('billing_module', 'STARTER'));
 
 router.use(checkClinicSubscription);
 

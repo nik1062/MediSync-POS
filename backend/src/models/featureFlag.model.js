@@ -3,9 +3,9 @@ const sequelize = require('../config/database');
 
 const FeatureFlag = sequelize.define('FeatureFlag', {
   id: {
-    type: DataTypes.INTEGER,
+    type: DataTypes.UUID,
     primaryKey: true,
-    autoIncrement: true,
+    defaultValue: DataTypes.UUIDV4,
   },
   plan: {
     type: DataTypes.STRING(20),
@@ -26,7 +26,7 @@ const FeatureFlag = sequelize.define('FeatureFlag', {
   tableName: 'feature_flags',
   timestamps: false,
   indexes: [
-    { unique: true, fields: ['plan', 'feature_key'] },
+    { unique: true, fields: ['plan', 'featureKey'] },
   ],
 });
 

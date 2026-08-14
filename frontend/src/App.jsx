@@ -12,6 +12,8 @@ import { POSTerminal } from './pages/POSTerminal';
 import { Discovery } from './pages/Discovery';
 import { Landing } from './pages/Landing';
 import { Appointments } from './pages/Appointments';
+import { ClinicAdminDashboard } from './pages/ClinicAdminDashboard';
+import { SuperAdminPanel } from './pages/SuperAdminPanel';
 import { 
   Activity, 
   Shield, 
@@ -90,6 +92,18 @@ function Layout({ children, user, setUser }) {
             <div className={`sidebar-link ${location.pathname === '/pos' ? 'active' : ''}`} onClick={() => navigate('/pos')}>
               <CreditCard className="sidebar-link-icon" size={18} />
               <span>{t('nav.pos_dashboard')}</span>
+            </div>
+          )}
+          {user?.role === 'CLINIC_ADMIN' && (
+            <div className={`sidebar-link ${location.pathname === '/clinic-admin' ? 'active' : ''}`} onClick={() => navigate('/clinic-admin')}>
+              <Activity className="sidebar-link-icon" size={18} />
+              <span>Clinic Admin</span>
+            </div>
+          )}
+          {user?.role === 'SUPER_ADMIN' && (
+            <div className={`sidebar-link ${location.pathname === '/super-admin' ? 'active' : ''}`} onClick={() => navigate('/super-admin')}>
+              <Shield className="sidebar-link-icon" size={18} />
+              <span>Super Admin</span>
             </div>
           )}
           
@@ -184,6 +198,8 @@ function App() {
           <Route path="/discovery" element={<Discovery user={user} />} />
           <Route path="/pos" element={<POSTerminal user={user} />} />
           <Route path="/consultation/:id" element={<ConsultationRoom user={user} />} />
+          <Route path="/clinic-admin" element={<ClinicAdminDashboard user={user} />} />
+          <Route path="/super-admin" element={<SuperAdminPanel user={user} />} />
           <Route path="*" element={<Navigate to="/dashboard" />} />
         </Routes>
       </Layout>
